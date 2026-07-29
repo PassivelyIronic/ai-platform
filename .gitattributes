@@ -1,0 +1,15 @@
+# Repo powstaje na Windowsie, a jego artefakty lądują w kontenerach Linuksa.
+# Bez tego CRLF trafiłby do manifestów i skryptów, co w obrazie objawia się
+# błędem "bad interpreter: /bin/sh^M".
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.json text eol=lf
+Makefile text eol=lf
+
+*.png binary
+*.jpg binary
+*.gz  binary
+*.tgz binary

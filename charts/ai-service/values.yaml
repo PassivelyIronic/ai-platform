@@ -1,0 +1,116 @@
+# Wartości domyślne charta ai-service.
+#
+# Ten plik NIE jest kontraktem — kontraktem jest services/<tenant>/service.yaml,
+# który nadpisuje poniższe. Tutaj stoi to, czego tenant nie musi deklarować,
+# żeby kontrakt zmieścił się w ~30 liniach.
+#
+# Każde pole, które tenant MOŻE ustawić, musi mieć tu sensowny default albo
+# jawny `null` z komentarzem dlaczego jest wymagane. Pole, którego tu nie ma,
+# nie istnieje w kontrakcie (guardrail #6 — żadnych per-tenant snowflake'ów).
+
+# --- wymagane, bez defaultu ---------------------------------------------------
+name: ~        # nazwa tenanta = nazwa namespace'u
+owner: ~       # kto dostaje alert; nie ma serwisu bez właściciela
+
+image:
+  repo: ~
+  tag: ~       # git SHA albo digest, NIGDY latest; bumpowany wyłącznie przez CI
+  pullPolicy: IfNotPresent
+
+# --- runtime ------------------------------------------------------------------
+runtime:
+  replicas: 2
+  resources:
+    requests: { memory: 1Gi, cpu: 500m }
+    limits: { memory: 2Gi, cpu: "2" }
+
+  # Cache wag modelu (HF_HOME). Domyślnie włączony, bo bez niego każdy restart
+  # poda ciągnie ~1.1 GB z Hugging Face (KUBERNETES.md §2).
+  cache:
+    enabled: true
+    size: 2Gi
+    mountPath: /cache
+
+  # Wartości domyślne z pomiaru na maszynie deweloperskiej: 7.7 s na wczytanie
+  # modelu + pobranie wag przy pustym cache. Na ARM (A1.Flex) będzie wolniej —
+  # D-002 wymaga POMIARU przed ustawieniem tych liczb per tenant.
+  probes:
+    startupSeconds: 150
+    readinessInitialDelay: 60
+
+  envFrom:
+    configMap: ~
+    secret: ~
+
+  # /ready NIGDY nie idzie pod liveness — zwraca 503 przy chwilowo niedostępnej
+  # bazie i restartowałby pody w pętli zamiast wypiąć je z Service. Ścieżki są
+  # tu jawne, żeby zmiana wymagała świadomego nadpisania.
+  paths:
+    liveness: /health
+    readiness: /ready
+    metrics: /metrics
+  port: 8000
+
+# --- opcjonalne UI ------------------------------------------------------------
+ui:
+  enabled: false
+  port: 8501
+
+# --- baza ---------------------------------------------------------------------
+database:
+  mode: managed          # managed → StatefulSet z charta | external → DSN z Secreta
+  seed: ~                # oci://... — dump pg_dump -Fc, tag po zawartości korpusu (D-016)
+  embeddingModel: ~      # musi zgadzać się z metadanymi dumpu (D-015)
+  storage: 5Gi
+  image: pgvector/pgvector:pg16
+  externalSecret: ~      # używane wyłącznie przy mode: external
+
+# --- bramka promocji ----------------------------------------------------------
+# Platforma czyta WYŁĄCZNIE exit code i timeout. Żadnego pola na progi, żadnego
+# parsowania wyjścia — progi żyją w repo tenanta (D-014, guardrail #2).
+gate:
+  # Ten sam obraz i tag co deployowane API (D-019). Osobny obraz bramki to drugi
+  # tag do zsynchronizowania, czyli druga okazja do rozjazdu między bramką
+  # a artefaktem, który ona ocenia.
+  image: ~
+  command: []
+
+  # NIE usuwaj i nie nadpisuj bez powodu. `evals/` jest do obrazu KOPIOWANY,
+  # nie instalowany w venv — `python -m evals.…` znajduje pakiet wyłącznie przez
+  # cwd. Inny katalog roboczy to ModuleNotFoundError, a przy okazji nietrafiona
+  # ścieżka do evals/thresholds.yaml (D-007, D-019).
+  workingDir: /app
+
+  needs: [database]
+  timeoutSeconds: 300
+
+# --- rollout ------------------------------------------------------------------
+rollout:
+  strategy: canary
+  steps: [10, 50, 100]
+  # Analiza startująca natychmiast uzna zdrową wersję za zepsutą, bo pod
+  # potrzebuje ~2 min do gotowości.
+  analysisStartAfterSeconds: 180
+
+# --- to, czego tenant nie ustawia ---------------------------------------------
+ingress:
+  enabled: true
+  className: traefik
+  host: ~
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+resourceQuota:
+  enabled: true
+
+networkPolicy:
+  enabled: true
+  # Namespace Prometheusa musi mieć dostęp do /metrics — endpoint jest
+  # nieautoryzowany z założenia, scraper nie może zależeć od sekretu aplikacji.
+  monitoringNamespace: monitoring
+
+# HPA nie ma i nie będzie (D-017): wąskim gardłem jest dzienny limit providera
+# generacji, nie CPU poda. Opt-in autoscaling po tsl_rag_stage_duration_seconds
+# jest kandydatem, ale nie po CPU.

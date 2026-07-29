@@ -1,0 +1,52 @@
+# Wyjście `make render` — manifesty odtwarzalne z charta, nie źródło prawdy.
+.render/
+*.rendered.yaml
+
+# Dokumenty tenantów. Kopia cudzego dokumentu to zobowiązanie do jej
+# aktualizowania, którego nikt nie dotrzymuje — w tym projekcie są już trzy
+# dowody (444 vs 438, `make ui`, `uv run` w §5). Odnośnik: repo + SHA, nie treść.
+# D-020.
+KUBERNETES.md
+docs/KUBERNETES.md
+
+# Sekrety w postaci jawnej. Do repo wchodzą WYŁĄCZNIE SealedSecrets
+# (secrets/*.sealed.yaml) — guardrail #4. Poniższe wzorce są siatką
+# bezpieczeństwa, nie zastępują przeglądu diffa.
+*.key
+*.pem
+*.p12
+*.pfx
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+.env
+.env.*
+!.env.example
+secrets/**/*.yaml
+!secrets/**/*.sealed.yaml
+secrets/**/*.json
+!secrets/.gitkeep
+
+# Helm
+charts/**/charts/
+charts/**/Chart.lock
+*.tgz
+
+# Lokalny stan uprawnień tej maszyny. Wersja współdzielona (.claude/settings.json)
+# jest śledzona — ta nie.
+.claude/settings.local.json
+
+# Narzędzia i edytory
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Python (walidacja schematu, skrypty pomocnicze)
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/

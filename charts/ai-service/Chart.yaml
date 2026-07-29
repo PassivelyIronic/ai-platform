@@ -1,0 +1,14 @@
+apiVersion: v2
+name: ai-service
+description: >-
+  Golden-path chart platformy. Jeden chart obsługuje wszystkich tenantów;
+  services/<tenant>/service.yaml jest jego plikiem values (D-008).
+type: application
+
+# Wersja charta — bumpowana przy każdej zmianie szablonów, bo propaguje się
+# na wszystkich tenantów naraz. Brak appVersion jest celowy: wersję aplikacji
+# niesie image.tag z kontraktu tenanta, nie chart.
+version: 0.1.0
+
+maintainers:
+  - name: jakub
