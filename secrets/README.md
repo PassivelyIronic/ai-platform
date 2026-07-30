@@ -61,8 +61,51 @@ kubectl create secret generic tsl-rag-secrets \
 ```
 
 Plik pośredni nigdy nie ląduje na dysku — pipe idzie prosto do `kubeseal`.
-Wartość nie przechodzi też przez zmienną shella ani przez `echo`: jedyne jej
-wystąpienie jest w tej linii, a historię shella dla niej się wyłącza.
+Klucz providera wklejasz w tę jedną linię i nigdzie indziej: nie przez `echo`,
+nie do zmiennej, nie do pliku `.env`.
+
+## Pułapka: hasło bazy występuje w dwóch sekretach
+
+`tsl-rag-postgres` niesie `POSTGRES_PASSWORD` dla StatefulSetu i Joba restore,
+ale aplikacja łączy się przez `POSTGRES_DSN` w `tsl-rag-secrets` — a DSN **zawiera
+to samo hasło**. Rozjazd między nimi nie objawia się przy synchronizacji: baza
+wstaje, restore przechodzi, a API wywala się na `/ready` z błędem
+uwierzytelnienia, wyglądającym jak awaria bazy.
+
+Dlatego oba sekrety wytwarza się **w jednym przebiegu**, z hasła trzymanego przez
+chwilę w zmiennej — to jedyny wyjątek od reguły wyżej i wynika z tego, że wartość
+musi trafić w dwa miejsca spójnie. Hasło jest generowane maszynowo i nigdy nie
+wypisywane:
+
+```bash
+for ENV in staging prod; do
+  PW="$(openssl rand -hex 24)"
+
+  kubectl create secret generic tsl-rag-postgres \
+    --namespace "tsl-rag-$ENV" \
+    --from-literal=POSTGRES_USER=tsl_rag \
+    --from-literal=POSTGRES_PASSWORD="$PW" \
+    --dry-run=client -o yaml \
+    | kubeseal --format yaml --controller-namespace sealed-secrets \
+    > "secrets/tsl-rag/$ENV/postgres.sealed.yaml"
+
+  kubectl create secret generic tsl-rag-secrets \
+    --namespace "tsl-rag-$ENV" \
+    --from-literal=OPENROUTER_API_KEY=... \
+    --from-literal=API_PASSWORD=... \
+    --from-literal=POSTGRES_DSN="postgresql+asyncpg://tsl_rag:$PW@postgres:5432/tsl_rag" \
+    --dry-run=client -o yaml \
+    | kubeseal --format yaml --controller-namespace sealed-secrets \
+    > "secrets/tsl-rag/$ENV/app.sealed.yaml"
+
+  unset PW
+done
+```
+
+Host w DSN to nazwa Service'u (`postgres`), nie FQDN z namespace'em — dzięki temu
+DSN jest identyczny w obu środowiskach poza hasłem, a rozdziela je namespace
+pieczęci. Nazwa bazy `tsl_rag` pochodzi z helpera charta (`name` z myślnikami
+zamienionymi na podkreślenia), nie jest wolnym wyborem.
 
 ## Po odtworzeniu klastra
 
