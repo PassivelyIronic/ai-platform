@@ -20,6 +20,30 @@ app.kubernetes.io/name: {{ include "ai-service.name" . }}
 app.kubernetes.io/component: api
 {{- end -}}
 
+{{- define "ai-service.databaseSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "ai-service.name" . }}
+app.kubernetes.io/component: database
+{{- end -}}
+
+{{/*
+Nazwa bazy. Myślnik jest w identyfikatorze Postgresa znakiem wymagającym
+cudzysłowów, więc `tsl-rag` musiałoby być cytowane w każdym zapytaniu i w DSN.
+Zamiana na podkreślnik daje `tsl_rag` — dokładnie to, czego używa dziś tenant #1.
+*/}}
+{{- define "ai-service.databaseName" -}}
+{{- .Values.database.name | default (include "ai-service.name" . | replace "-" "_") -}}
+{{- end -}}
+
+{{/*
+Referencja obrazu z artefaktem seed. Kontrakt zapisuje ją jako `oci://…`, żeby
+było widać, że to artefakt rejestru, a nie ścieżka w repo; runtime kontenerowy
+tego przedrostka nie rozumie.
+*/}}
+{{- define "ai-service.seedImage" -}}
+{{- $seed := required "database.seed jest wymagane przy database.mode: managed" .Values.database.seed -}}
+{{- trimPrefix "oci://" $seed -}}
+{{- end -}}
+
 {{/*
 Właściciel jedzie w etykiecie, nie tylko w kontrakcie: alert bez adresata to
 alert, który nikt nie odbierze.

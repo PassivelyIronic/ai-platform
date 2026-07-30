@@ -1,0 +1,79 @@
+{{- $gate := required "kontrakt musi mieć sekcję `gate` — serwis bez bramki nie wchodzi na platformę" .Values.gate -}}
+{{- $name := include "ai-service.name" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-gate" $name }}
+  labels:
+    {{- include "ai-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gate
+  annotations:
+    # PostSync: bramka rusza dopiero, gdy wszystko inne jest zsynchronizowane
+    # i zdrowe (D-004). Wcześniej oceniałaby środowisko, którego jeszcze nie ma.
+    argocd.argoproj.io/hook: PostSync
+    # Job jest niemutowalny, więc kolejna synchronizacja musi go skasować,
+    # zanim utworzy nowy. BeforeHookCreation zostawia poprzedni Job do wglądu
+    # aż do następnego uruchomienia — logi nieudanej bramki są tym, po co się
+    # sięga najpierw.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # ZERO ponowień. Bramka jest deterministyczna: te same dane dają ten sam wynik
+  # (D-013). Retry miałby sens tylko przy wyniku losowym — a gdyby bramka
+  # kiedykolwiek zamigała, to jest bug do zbadania, nie powód do powtórzenia.
+  backoffLimit: 0
+
+  # Platforma egzekwuje wyłącznie exit code i limit czasu. Nic tu nie parsuje
+  # wyjścia bramki i nie zna jej progów — te mieszkają w repo tenanta (D-014).
+  activeDeadlineSeconds: {{ $gate.timeoutSeconds | default 300 }}
+
+  template:
+    metadata:
+      labels:
+        {{- include "ai-service.labels" . | nindent 8 }}
+        app.kubernetes.io/component: gate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: gate
+          # Ten sam obraz i tag co deployowane API — bramka ocenia dokładnie ten
+          # artefakt, który ma promować (D-019). Walidator kontraktu pilnuje,
+          # żeby te dwie wartości się nie rozjechały.
+          image: {{ $gate.image }}
+          command:
+            {{- toYaml $gate.command | nindent 12 }}
+          # Katalog roboczy bywa jedynym miejscem, z którego da się znaleźć
+          # zestaw ewaluacyjny — gdy jest do obrazu kopiowany, a nie instalowany.
+          workingDir: {{ $gate.workingDir | default "/app" | quote }}
+          {{- with .Values.runtime.envFrom }}
+          envFrom:
+            {{- if .configMap }}
+            - configMapRef:
+                name: {{ .configMap }}
+            {{- end }}
+            {{- if .secret }}
+            - secretRef:
+                name: {{ .secret }}
+            {{- end }}
+          {{- end }}
+          {{- if .Values.runtime.cache.enabled }}
+          env:
+            - name: HF_HOME
+              value: {{ printf "%s/huggingface" (.Values.runtime.cache.mountPath | default "/cache") | quote }}
+          volumeMounts:
+            - name: hf-cache
+              mountPath: {{ .Values.runtime.cache.mountPath | default "/cache" }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.runtime.resources | nindent 12 }}
+      {{- if .Values.runtime.cache.enabled }}
+      volumes:
+        # Ten sam PVC co API. Bramka liczy embeddingi zapytań lokalnie, więc bez
+        # cache'a pobierałaby 1.1 GB przy każdym uruchomieniu — czyli przy każdej
+        # synchronizacji.
+        - name: hf-cache
+          persistentVolumeClaim:
+            claimName: {{ $name }}-hf-cache
+      {{- end }}

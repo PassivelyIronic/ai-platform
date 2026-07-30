@@ -1,0 +1,108 @@
+{{- if eq .Values.database.mode "managed" }}
+{{- $name := include "ai-service.name" . -}}
+{{- $db := .Values.database -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Nazwa niesie tag seeda: zmiana korpusu daje NOWY Job, zamiast próby
+  # modyfikacji istniejącego. Pole `spec` Joba jest w większości niemutowalne,
+  # więc bez tego ArgoCD zgłaszałby błąd aktualizacji przy każdej zmianie dumpu.
+  name: {{ printf "%s-restore-%s" $name (regexReplaceAll "[^a-z0-9]" (last (splitList ":" (include "ai-service.seedImage" .))) "-") | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "ai-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: restore
+  annotations:
+    # Wave 1 — po bazie, przed API. Bramka jedzie w PostSync, czyli po wszystkim.
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        {{- include "ai-service.labels" . | nindent 8 }}
+        app.kubernetes.io/component: restore
+    spec:
+      restartPolicy: Never
+
+      # Artefakt seed to obraz OCI niosący wyłącznie plik dumpu. initContainer
+      # przekłada go do wolumenu współdzielonego z kontenerem, który ma
+      # pg_restore. Alternatywą byłby ORAS w klastrze — dodatkowe narzędzie
+      # i dodatkowe auth po to, żeby pobrać jeden plik.
+      initContainers:
+        - name: fetch-dump
+          image: {{ include "ai-service.seedImage" . }}
+          command: ["sh", "-c", "cp /seed/document_chunks.dump /shared/ && ls -l /shared/"]
+          volumeMounts:
+            - name: dump
+              mountPath: /shared
+
+      containers:
+        - name: restore
+          image: {{ $db.restoreImage }}
+          env:
+            - name: PGHOST
+              value: {{ $db.serviceName | default "postgres" | quote }}
+            - name: PGDATABASE
+              value: {{ include "ai-service.databaseName" . | quote }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $name }}-postgres
+                  key: POSTGRES_USER
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $name }}-postgres
+                  key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: dump
+              mountPath: /shared
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+
+              # Idempotencja. ArgoCD resynchronizuje, a Job bez tego sprawdzenia
+              # uruchamiałby pg_restore na zasiedlonej bazie.
+              #
+              # Zmierzone zachowanie takiego powtórzenia: dane NIE są duplikowane,
+              # bo COPY odbija się od klucza głównego na chunk_id. pg_restore
+              # kończy się natomiast kodem 1 i ośmioma błędami, co ArgoCD pokaże
+              # jako czerwoną synchronizację. To sprawdzenie chroni więc przed
+              # fałszywą awarią przy każdym resyncu, a nie przed korupcją danych.
+              table=$(psql -tAc "select to_regclass('public.document_chunks') is not null")
+              if [ "$table" = "t" ]; then
+                rows=$(psql -tAc "select count(*) from document_chunks")
+                if [ "$rows" -gt 0 ]; then
+                  echo "Baza ma juz $rows wierszy — restore pominiety."
+                  exit 0
+                fi
+              fi
+
+              # Rozszerzenie przed restore. Dump tabeli go nie niesie —
+              # bez tego pg_restore wywala sie na braku typu vector.
+              psql -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+              pg_restore --no-owner --no-privileges -d "$PGDATABASE" /shared/document_chunks.dump
+
+              rows=$(psql -tAc "select count(*) from document_chunks")
+              model=$(psql -tAc "select distinct metadata->>'embedding_model' from document_chunks")
+              echo "Zasiedlono: $rows wierszy, model $model"
+
+              # Ostatnia linia obrony przed niezgodnoscia modelu. CI tenanta
+              # porownuje to wczesniej, ale kontrakt i artefakt moga sie rozjechac
+              # recznym bumpem — a niezgodny model daje losowe wyniki retrievalu
+              # i NIE zglasza bledu.
+              if [ "$model" != "{{ $db.embeddingModel }}" ]; then
+                echo "BLAD: model w dumpie ($model) != database.embeddingModel z kontraktu ({{ $db.embeddingModel }})"
+                exit 1
+              fi
+          resources:
+            requests: { memory: 128Mi, cpu: 100m }
+            limits: { memory: 512Mi, cpu: "1" }
+
+      volumes:
+        - name: dump
+          emptyDir: {}
+{{- end }}

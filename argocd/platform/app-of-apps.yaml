@@ -1,0 +1,31 @@
+# Komponenty platformowe — to, czym ArgoCD zarządza, gdy już istnieje.
+#
+# Granica względem repo `platform-infra` (D-018): tam mieszka wszystko, co jest
+# potrzebne, ŻEBY ArgoCD wstało (instancje, sieć, k3s, StorageClass, bootstrap
+# ArgoCD). Tutaj wszystko po tym momencie.
+#
+# App-of-apps, a nie ApplicationSet: komponentów platformy jest kilka, są różne
+# i nie przybywa ich przez dodanie katalogu. Generator miałby sens, gdyby były
+# jednorodne — nie są (D-009).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/PassivelyIronic/ai-platform.git
+    targetRevision: main
+    path: argocd/platform/components
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

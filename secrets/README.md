@@ -7,6 +7,20 @@ więc mogą leżeć w publicznym repo.
 `.gitignore` blokuje w tym katalogu każdy `*.yaml` i `*.json`, który nie kończy się
 na `.sealed.yaml`. To siatka bezpieczeństwa, nie zastępstwo dla przejrzenia diffa.
 
+## Czego wymaga chart
+
+Dla tenanta z `database.mode: managed` chart oczekuje Secreta o nazwie
+`<tenant>-postgres` z kluczami `POSTGRES_USER` i `POSTGRES_PASSWORD`. Odwołują
+się do niego StatefulSet bazy i Job restore.
+
+Chart **nie generuje** tych poświadczeń celowo. `helm template` jest bezstanowy,
+więc wygenerowane hasło byłoby inne przy każdej synchronizacji — ArgoCD
+przepisywałby Secret w kółko, a baza i aplikacja rozjeżdżałyby się co do
+poświadczeń przy pierwszym `selfHeal`.
+
+Poza tym tenant potrzebuje Secreta wskazanego w `runtime.envFrom.secret`
+(dla tenanta #1: `tsl-rag-secrets`) z kluczem providera generacji.
+
 ## Wytworzenie
 
 ```bash

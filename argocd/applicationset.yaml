@@ -1,0 +1,78 @@
+# ApplicationSet z generatorem katalogów: jeden Application na każdy katalog
+# w services/. Dodanie tenanta to dodanie katalogu z kontraktem — bez edycji
+# czegokolwiek tutaj (D-009). To jest mechanizm, na którym stoi teza
+# o samoobsłudze: gdyby onboarding wymagał dopisania Application, platforma
+# byłaby zbiorem manifestów z ładną nazwą.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tenants
+  namespace: argocd
+spec:
+  # goTemplate zamiast starej składni: brakujący klucz ma być błędem, a nie
+  # pustym łańcuchem wstawionym w nazwę namespace'u.
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - git:
+        repoURL: https://github.com/PassivelyIronic/ai-platform.git
+        revision: main
+        directories:
+          - path: services/*
+
+  template:
+    metadata:
+      name: "{{.path.basename}}"
+      labels:
+        ai-platform.io/tenant: "{{.path.basename}}"
+    spec:
+      project: default
+
+      # Dwa źródła, nie jedno: chart mieszka w charts/ai-service, a kontrakt
+      # w services/<tenant>/. Odwołanie `$values` jest udokumentowanym sposobem
+      # sięgnięcia po plik values leżący poza katalogiem charta — ścieżki
+      # relatywne z `../..` bywały blokowane jako wychodzące poza zakres.
+      sources:
+        - repoURL: https://github.com/PassivelyIronic/ai-platform.git
+          targetRevision: main
+          path: charts/ai-service
+          helm:
+            valueFiles:
+              - "$values/services/{{.path.basename}}/service.yaml"
+        - repoURL: https://github.com/PassivelyIronic/ai-platform.git
+          targetRevision: main
+          ref: values
+
+      destination:
+        server: https://kubernetes.default.svc
+        # Namespace = nazwa katalogu. Walidator kontraktu pilnuje, żeby zgadzała
+        # się z polem `name`, bo rozjazd wdrożyłby serwis gdzie indziej, niż mówi
+        # kontrakt.
+        namespace: "{{.path.basename}}"
+
+      syncPolicy:
+        automated:
+          # prune: usunięcie katalogu z services/ usuwa serwis. Bez tego zostają
+          # sieroty, których nikt nie sprząta, bo nikt o nich nie wie.
+          prune: true
+          # selfHeal: ręczna zmiana w prod jest cofana. To jest egzekucja
+          # guardraila „żadnych ręcznych zmian na prodzie", a nie preferencja.
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          # Etykieta na namespace jest wymagana przez NetworkPolicy z charta:
+          # selektory po `kubernetes.io/metadata.name` działają tylko wtedy,
+          # gdy kube-apiserver ją nadaje — w K8s ≥ 1.21 nadaje automatycznie.
+          - ApplyOutOfSyncOnly=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 20s
+            factor: 2
+            maxDuration: 3m
+
+  # Usunięcie katalogu usuwa Application, a wraz z nim zasoby. Namespace zostaje
+  # — jego skasowanie zabrałoby też PVC bazy, a to ma być decyzja człowieka.
+  syncPolicy:
+    preserveResourcesOnDeletion: false

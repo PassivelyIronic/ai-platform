@@ -68,8 +68,22 @@ database:
   seed: ~                # oci://... — dump pg_dump -Fc, tag po zawartości korpusu (D-016)
   embeddingModel: ~      # musi zgadzać się z metadanymi dumpu (D-015)
   storage: 5Gi
+  storageClass: ~
   image: pgvector/pgvector:pg16
   externalSecret: ~      # używane wyłącznie przy mode: external
+
+  # Nazwa Service'u bazy. Aplikacja tenanta ma DSN w swoim ConfigMapie, więc
+  # zmiana tej wartości bez zmiany DSN daje pody, które nie znajdą bazy.
+  serviceName: postgres
+  name: ~                # domyślnie nazwa tenanta z myślnikami zamienionymi na podkreślniki
+
+  resources:
+    requests: { memory: 256Mi, cpu: 100m }
+    limits: { memory: 1Gi, cpu: "1" }
+
+  # Obraz z klientem pg_restore. Ta sama major wersja co baza — pg_restore
+  # ze starszej odmawia wczytania dumpu z nowszej.
+  restoreImage: pgvector/pgvector:pg16
 
 # --- bramka promocji ----------------------------------------------------------
 # Platforma czyta WYŁĄCZNIE exit code i timeout. Żadnego pola na progi, żadnego
@@ -110,12 +124,24 @@ serviceMonitor:
 
 resourceQuota:
   enabled: true
+  # Limity namespace'u. Sens jest w izolacji tenantów: bez quoty jeden serwis
+  # w pętli restartów wypycha pody drugiego z węzła. Wartości pokrywają API,
+  # bazę i doraźne Joby (restore, bramka) z zapasem na czas rolloutu, kiedy
+  # stara i nowa wersja żyją równolegle.
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "6"
+    limits.memory: 8Gi
+    persistentvolumeclaims: "4"
+    pods: "10"
 
 networkPolicy:
   enabled: true
   # Namespace Prometheusa musi mieć dostęp do /metrics — endpoint jest
   # nieautoryzowany z założenia, scraper nie może zależeć od sekretu aplikacji.
   monitoringNamespace: monitoring
+  ingressNamespace: ingress-nginx
 
 # HPA nie ma i nie będzie (D-017): wąskim gardłem jest dzienny limit providera
 # generacji, nie CPU poda. Opt-in autoscaling po tsl_rag_stage_duration_seconds

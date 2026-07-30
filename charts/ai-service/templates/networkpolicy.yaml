@@ -1,0 +1,72 @@
+{{- $np := .Values.networkPolicy | default dict -}}
+{{- if $np.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ai-service.name" . }}
+  labels:
+    {{- include "ai-service.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+
+  ingress:
+    # Ruch wewnątrz namespace'u: API ↔ baza, bramka ↔ baza.
+    - from:
+        - podSelector: {}
+
+    # Scrape Prometheusa. /metrics jest nieautoryzowany z założenia — scraper
+    # nie może zależeć od sekretu aplikacji — więc dostęp ogranicza się tutaj,
+    # do jednego namespace'u, a nie w aplikacji.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.monitoringNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.runtime.port | int }}
+
+    {{- with $np.ingressNamespace }}
+    # Ruch użytkowników wchodzi przez kontroler Ingress, który stoi we własnym
+    # namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.runtime.port | int }}
+    {{- end }}
+
+  egress:
+    - to:
+        - podSelector: {}
+
+    # DNS. Bez tego pod nie rozwiąże ani nazwy bazy, ani hosta providera —
+    # i objawi się to jako timeout, nie jako błąd polityki sieciowej.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Wyjście do internetu: provider generacji i rejestr obrazów. Zawężone do
+    # HTTPS i z wykluczeniem adresacji prywatnej, żeby polityka nie stała się
+    # furtką do reszty klastra.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+{{- end }}

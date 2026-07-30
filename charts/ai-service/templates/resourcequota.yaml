@@ -1,0 +1,16 @@
+{{- $quota := .Values.resourceQuota | default dict -}}
+{{- if $quota.enabled }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "ai-service.name" . }}
+  labels:
+    {{- include "ai-service.labels" . | nindent 4 }}
+  annotations:
+    # Wave -1: quota musi obowiązywać, zanim powstanie cokolwiek, co miałaby
+    # ograniczać. Nałożona później nie cofa już przydzielonych zasobów.
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  hard:
+    {{- toYaml $quota.hard | nindent 4 }}
+{{- end }}

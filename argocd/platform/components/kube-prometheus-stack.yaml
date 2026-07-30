@@ -1,0 +1,58 @@
+# Prometheus + Grafana + Alertmanager, razem z CRD ServiceMonitor, bez którego
+# chart tenanta renderuje zasób, którego klaster nie zna.
+#
+# Wave -4: przed tenantami, bo ich ServiceMonitory potrzebują CRD. ApplicationSet
+# tenantów nie ma z tym jawnej zależności — synchronizacja tenanta wcześniej niż
+# CRD kończy się błędem i ponowieniem, a nie trwałą awarią, ale to i tak wygląda
+# na czerwony klaster przy każdym bootstrapie.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 66.2.1
+    helm:
+      releaseName: kube-prometheus-stack
+      values: |
+        # Prometheus ma zbierać ServiceMonitory ze WSZYSTKICH namespace'ów,
+        # także tych, które dopiero powstaną. Domyślnie chart ogranicza się do
+        # zasobów z własną etykietą release'u — nowy tenant byłby wtedy
+        # niewidoczny, dopóki ktoś nie dopisałby mu etykiety.
+        prometheus:
+          prometheusSpec:
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            retention: 15d
+            resources:
+              requests: { memory: 512Mi, cpu: 200m }
+              limits: { memory: 2Gi, cpu: "1" }
+        grafana:
+          # Dashboardy jadą z repo jako ConfigMapy z etykietą grafana_dashboard,
+          # nie klikane w UI — inaczej znikają razem z podem.
+          sidecar:
+            dashboards:
+              enabled: true
+              searchNamespace: ALL
+        # Node exporter i kube-state-metrics zostają: bez nich nie widać
+        # wysycenia węzła, czyli pierwszej rzeczy, o którą się pyta, gdy tenant
+        # zgłasza wolne odpowiedzi.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # CRD kube-prometheus-stack przekraczają limit adnotacji last-applied,
+      # więc apply po stronie klienta się na nich wywraca.
+      - ServerSideApply=true
