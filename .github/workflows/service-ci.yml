@@ -1,0 +1,336 @@
+# Reusable workflow platformy — wołany przez repo tenanta.
+#
+# Logika pipeline'u mieszka TUTAJ, nie w repozytoriach tenantów. Tenant deklaruje
+# wejścia i woła ten workflow; zmiana w pipelinie propaguje się na wszystkich
+# tenantów naraz, zamiast wymagać N identycznych poprawek.
+#
+# Wywołanie po stronie tenanta (.github/workflows/ci.yml):
+#
+#   jobs:
+#     ci:
+#       uses: PassivelyIronic/ai-platform/.github/workflows/service-ci.yml@main
+#       with:
+#         image-name: ghcr.io/passivelyironic/tsl-rag-api
+#         gate-command: python -m evals.run_retrieval_evals
+#         seed-image: ghcr.io/passivelyironic/tsl-rag-corpus:corpus-f646c99b8ebf
+#         embedding-model: intfloat/multilingual-e5-base
+#       secrets: inherit
+#
+# Co ten workflow egzekwuje, poza zbudowaniem obrazu:
+#
+# 1. **Smoke test bramki na zbudowanym artefakcie** (guardrail #5). Komenda bramki
+#    jest uruchamiana na obrazie, który właśnie powstał, a nie na klonie repo.
+#    Rozjazd między deklaracją a artefaktem failuje build, a nie deployment —
+#    dokładnie ta klasa błędu wywróciła bramkę tenanta #1 (DECISIONS D-019).
+# 2. **Zgodność modelu embeddingów** (D-015). Label artefaktu seed jest porównywany
+#    z modelem zadeklarowanym przez tenanta. Niezgodność wychodzi tutaj, a nie
+#    60 sekund po starcie poda API, na startupProbe.
+#
+# Czego ten workflow NIE robi: nie czyta progów bramki, nie parsuje jej wyjścia,
+# nie interpretuje liczb. Sprawdza wyłącznie exit code (D-014, guardrail #2).
+#
+# ZNANE OGRANICZENIE (do rozstrzygnięcia przy onboardingu tenanta #2):
+# job `quality` zakłada stack tenanta #1 — `uv`, `.python-version`, `uv.lock`.
+# Same komendy są wejściami, ale kroki instalacyjne już nie, więc tenant bez `uv`
+# nie zawoła tego workflow bez zmian tutaj. To jest dziura w kontrakcie, nie
+# w tenancie (guardrail #6): pierwsza rzecz, którą trzeba będzie uogólnić, i wpis
+# do `docs/onboarding-retro.md`, gdy tenant #2 się o nią potknie.
+
+name: service-ci
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: "Pełna nazwa obrazu bez tagu, np. ghcr.io/owner/app"
+        required: true
+        type: string
+      gate-command:
+        description: "Komenda bramki uruchamiana W OBRAZIE. Bez `uv` — nie ma go w warstwie runtime."
+        required: true
+        type: string
+      seed-image:
+        description: "Artefakt OCI z seed dumpem, pinowany po tagu z zawartości (D-016)."
+        required: true
+        type: string
+      embedding-model:
+        description: "Model embeddingów z kontraktu. Porównywany z labelem artefaktu seed."
+        required: true
+        type: string
+
+      platforms:
+        description: "Architektury obrazu. Klaster docelowy to ARM (D-002), GKE Autopilot amd64 (D-011)."
+        required: false
+        type: string
+        default: linux/amd64,linux/arm64
+      dockerfile:
+        required: false
+        type: string
+        default: docker/Dockerfile
+      build-context:
+        required: false
+        type: string
+        default: "."
+      gate-working-dir:
+        description: "Katalog roboczy bramki. evals/ bywa kopiowany, nie instalowany — wtedy znajduje się przez cwd."
+        required: false
+        type: string
+        default: /app
+      gate-timeout-minutes:
+        required: false
+        type: number
+        default: 15
+      gate-env:
+        description: "Dodatkowe zmienne dla bramki, po jednej na linię w formacie KEY=VALUE."
+        required: false
+        type: string
+        default: ""
+      seed-dump-path:
+        required: false
+        type: string
+        default: /seed/document_chunks.dump
+      postgres-image:
+        required: false
+        type: string
+        default: pgvector/pgvector:pg16
+      lint-command:
+        required: false
+        type: string
+        default: uv run ruff check .
+      format-command:
+        required: false
+        type: string
+        default: uv run ruff format --check .
+      test-command:
+        required: false
+        type: string
+        default: uv run pytest -m unit
+    outputs:
+      image-tag:
+        description: "Tag zbudowanego obrazu — git SHA."
+        value: ${{ jobs.build.outputs.tag }}
+      image-digest:
+        description: "Digest manifest listy. To po nim pinuje się obraz, nie po tagu."
+        value: ${{ jobs.build.outputs.digest }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # Nazwy bazy używane zarówno przez serwis Postgresa, jak i przez DSN bramki.
+  PGDATABASE: gate
+  PGUSER: postgres
+  PGPASSWORD: postgres
+
+jobs:
+  # ---------------------------------------------------------------------------
+  quality:
+    name: lint + testy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalacja uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Instalacja Pythona z .python-version
+        run: uv python install
+
+      - name: Synchronizacja zależności
+        run: uv sync --frozen
+
+      - name: Lint
+        run: ${{ inputs.lint-command }}
+
+      - name: Formatowanie
+        run: ${{ inputs.format-command }}
+
+      - name: Testy jednostkowe
+        run: ${{ inputs.test-command }}
+
+  # ---------------------------------------------------------------------------
+  build:
+    name: build + push
+    needs: quality
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # QEMU jest potrzebny wyłącznie do budowania arm64 na amd64-owym runnerze.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Logowanie do GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag = git SHA. Nigdy `latest`: tag musi jednoznacznie wskazywać kod,
+      # inaczej rollback i canary porównują się do ruchomego celu.
+      - name: Wyliczenie tagu
+        id: meta
+        run: echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build i push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.build-context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ inputs.image-name }}:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  gate-smoke:
+    name: smoke test bramki
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.gate-timeout-minutes }}
+
+    services:
+      postgres:
+        image: ${{ inputs.postgres-image }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d gate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Logowanie do GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pobranie artefaktu seed
+        env:
+          SEED_IMAGE: ${{ inputs.seed-image }}
+        run: docker pull "$SEED_IMAGE"
+
+      # D-015: dump niesie w metadanych model, którym policzono wektory. Wektor
+      # z modelu A porównany z zapytaniem z modelu B daje losowe wyniki i NIE
+      # zgłasza błędu — warmup() aplikacji to złapie, ale dopiero w podzie.
+      - name: Zgodność modelu embeddingów z labelem artefaktu
+        env:
+          SEED_IMAGE: ${{ inputs.seed-image }}
+          EMBEDDING_MODEL: ${{ inputs.embedding-model }}
+        run: |
+          set -euo pipefail
+          label=$(docker inspect --format '{{ index .Config.Labels "io.tsl-rag.embedding-model" }}' "$SEED_IMAGE")
+          echo "artefakt: ${label:-<brak labela>}"
+          echo "kontrakt: $EMBEDDING_MODEL"
+          if [ -z "$label" ]; then
+            echo "::error::Artefakt seed nie niesie labela io.tsl-rag.embedding-model."
+            exit 1
+          fi
+          if [ "$label" != "$EMBEDDING_MODEL" ]; then
+            echo "::error::Model w artefakcie ($label) != model z kontraktu ($EMBEDDING_MODEL)."
+            exit 1
+          fi
+
+      - name: Wyjęcie dumpu z artefaktu
+        env:
+          SEED_IMAGE: ${{ inputs.seed-image }}
+          SEED_DUMP_PATH: ${{ inputs.seed-dump-path }}
+        run: |
+          set -euo pipefail
+          cid=$(docker create "$SEED_IMAGE")
+          docker cp "$cid:$SEED_DUMP_PATH" ./seed.dump
+          docker rm "$cid" >/dev/null
+          ls -lh ./seed.dump
+
+      # Kolejność odpowiada sync waves z charta: rozszerzenie przed restore.
+      # Dump tabeli nie niesie rozszerzenia — bez tego kroku pg_restore wywala się
+      # na `type "public.vector" does not exist`.
+      - name: Rozszerzenie vector, potem restore
+        run: |
+          set -euo pipefail
+          psql -h localhost -U "$PGUSER" -d "$PGDATABASE" -qc "CREATE EXTENSION IF NOT EXISTS vector;"
+          pg_restore -h localhost -U "$PGUSER" -d "$PGDATABASE" ./seed.dump
+          psql -h localhost -U "$PGUSER" -d "$PGDATABASE" -tAc \
+            "select 'wierszy w document_chunks: ' || count(*) from document_chunks;"
+
+      # Model embeddingów (~1.1 GB) nie jest w obrazie — bez cache'a każdy przebieg
+      # ciągnie go z Hugging Face. Klucz zawiera nazwę modelu, więc jego zmiana
+      # unieważnia cache zamiast po cichu użyć starych wag.
+      - name: Cache wag modelu
+        uses: actions/cache@v4
+        with:
+          path: ~/hf-cache
+          key: hf-${{ inputs.embedding-model }}
+
+      - name: Przygotowanie katalogu cache
+        run: |
+          mkdir -p ~/hf-cache
+          chmod 777 ~/hf-cache
+
+      - name: Plik ze zmiennymi bramki
+        env:
+          GATE_ENV: ${{ inputs.gate-env }}
+        run: |
+          set -euo pipefail
+          {
+            echo "POSTGRES_DSN=postgresql+asyncpg://$PGUSER:$PGPASSWORD@localhost:5432/$PGDATABASE"
+            printf '%s\n' "$GATE_ENV"
+          } | grep -v '^$' > gate.env
+          sed 's/=.*/=<ukryte>/' gate.env
+
+      # ---------------------------------------------------------------------
+      # To jest właściwy sens tego joba.
+      #
+      # Bramka jest uruchamiana na ŚWIEŻO ZBUDOWANYM OBRAZIE, jego własną komendą
+      # z kontraktu — nie na klonie repo i nie przez `uv`. Komenda, która działa
+      # w klonie i nie działa w obrazie, jest tu najdroższym rodzajem błędu
+      # dokumentacji i ma failować build, a nie deployment (guardrail #5).
+      #
+      # --network host: serwis Postgresa jest wystawiony na localhost runnera,
+      # a kontener bramki musi go widzieć pod tym samym adresem, pod którym
+      # zobaczy go Service w klastrze.
+      #
+      # Uruchamiany jest wariant amd64 manifest listy — runner jest amd64.
+      # arm64 przechodzi wyłącznie build. To świadomy kompromis: emulacja przez
+      # QEMU kosztuje kilka minut na przebieg i nie wykrywa niczego, czego nie
+      # wykryje pierwszy deploy na klaster.
+      #
+      # Platforma czyta WYŁĄCZNIE exit code. Żadnego parsowania wyjścia, żadnych
+      # progów po tej stronie (D-014).
+      # ---------------------------------------------------------------------
+      - name: Bramka na zbudowanym artefakcie
+        env:
+          IMAGE_REF: ${{ inputs.image-name }}:${{ needs.build.outputs.tag }}
+          GATE_WORKDIR: ${{ inputs.gate-working-dir }}
+          # Bez cudzysłowów przy użyciu — komenda MA się rozbić na słowa.
+          GATE_COMMAND: ${{ inputs.gate-command }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --network host \
+            --env-file gate.env \
+            --workdir "$GATE_WORKDIR" \
+            -v "$HOME/hf-cache:/home/tsl/.cache/huggingface" \
+            "$IMAGE_REF" \
+            $GATE_COMMAND
+
+      - name: Wynik
+        env:
+          IMAGE_REF: ${{ inputs.image-name }}:${{ needs.build.outputs.tag }}
+        run: echo "Bramka przeszła na obrazie $IMAGE_REF"
