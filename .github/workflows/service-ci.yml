@@ -204,9 +204,16 @@ jobs:
 
       # Tag = git SHA. Nigdy `latest`: tag musi jednoznacznie wskazywać kod,
       # inaczej rollback i canary porównują się do ruchomego celu.
+      #
+      # Przy zdarzeniu `pull_request` `github.sha` wskazuje EFEMERYCZNY merge commit
+      # (refs/pull/N/merge), którego nie ma w historii repozytorium. Obraz otagowany
+      # takim SHA jest niepinowalny: nie da się z niego wrócić do kodu ani odtworzyć
+      # buildu po zamknięciu PR-a. Dlatego dla PR-ów bierzemy SHA głowy gałęzi.
       - name: Wyliczenie tagu
         id: meta
-        run: echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "tag=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Build i push
         id: push
