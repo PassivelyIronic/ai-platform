@@ -93,6 +93,11 @@ on:
         required: false
         type: string
         default: pgvector/pgvector:pg16
+      sync-command:
+        description: "Instalacja zależności. Tenant, którego testy potrzebują extras, nadpisuje to wejście."
+        required: false
+        type: string
+        default: uv sync --frozen
       lint-command:
         required: false
         type: string
@@ -101,10 +106,23 @@ on:
         required: false
         type: string
         default: uv run ruff format --check .
+      typecheck-command:
+        description: "Pusty = krok pomijany. Nie każdy tenant musi mieć kontrolę typów."
+        required: false
+        type: string
+        default: ""
       test-command:
         required: false
         type: string
         default: uv run pytest -m unit
+      quality-env:
+        description: >-
+          Zmienne dla lintu i testów, po jednej na linię w formacie KEY=VALUE.
+          Typowy przypadek: konfiguracja wymagająca pola, którego job nie używa —
+          atrapa DSN dla aplikacji walidującej ustawienia przy imporcie.
+        required: false
+        type: string
+        default: ""
     outputs:
       image-tag:
         description: "Tag zbudowanego obrazu — git SHA."
@@ -135,18 +153,29 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Instalacja Pythona z .python-version
         run: uv python install
 
+      - name: Zmienne środowiskowe tenanta
+        if: inputs.quality-env != ''
+        env:
+          QUALITY_ENV: ${{ inputs.quality-env }}
+        run: printf '%s\n' "$QUALITY_ENV" | grep -v '^$' >> "$GITHUB_ENV"
+
       - name: Synchronizacja zależności
-        run: uv sync --frozen
+        run: ${{ inputs.sync-command }}
 
       - name: Lint
         run: ${{ inputs.lint-command }}
 
       - name: Formatowanie
         run: ${{ inputs.format-command }}
+
+      - name: Typy
+        if: inputs.typecheck-command != ''
+        run: ${{ inputs.typecheck-command }}
 
       - name: Testy jednostkowe
         run: ${{ inputs.test-command }}
