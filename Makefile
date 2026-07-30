@@ -63,6 +63,7 @@ bootstrap:
 	kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}"
 
 tenants:
+	kubectl apply -f argocd/secrets-applicationset.yaml
 	kubectl apply -f argocd/applicationset.yaml
 
 teardown:

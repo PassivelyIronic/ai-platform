@@ -62,6 +62,12 @@
             "readinessInitialDelay": { "type": "integer", "minimum": 0, "maximum": 600 }
           }
         },
+        "env": {
+          "description": "Zmienne jawne, renderowane przez chart jako ConfigMap. NIE wpisuje się tu sekretów — ConfigMapa jest jawna i leży w gicie; klucze providerów idą przez envFrom.secret (SealedSecret).",
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] },
+          "propertyNames": { "pattern": "^[A-Z][A-Z0-9_]*$" }
+        },
         "envFrom": {
           "type": "object",
           "additionalProperties": false,

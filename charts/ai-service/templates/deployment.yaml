@@ -35,17 +35,8 @@ spec:
           ports:
             - name: http
               containerPort: {{ $port }}
-          {{- with .Values.runtime.envFrom }}
           envFrom:
-            {{- if .configMap }}
-            - configMapRef:
-                name: {{ .configMap }}
-            {{- end }}
-            {{- if .secret }}
-            - secretRef:
-                name: {{ .secret }}
-            {{- end }}
-          {{- end }}
+            {{- include "ai-service.envFrom" . | nindent 12 }}
           {{- if $cache.enabled }}
           env:
             # Katalog wag modelu. Obraz celowo ich nie zawiera — ważyłby ~2 GB

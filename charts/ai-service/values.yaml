@@ -44,6 +44,14 @@ runtime:
     startupSeconds: 150
     readinessInitialDelay: 60
 
+  # Zmienne jawne, renderowane przez chart jako ConfigMap <tenant>-env.
+  # Bez tego pola kontrakt wskazywałby ConfigMapę, której nic nie tworzy,
+  # a onboarding wymagałby ręcznego kubectl — czyli przestałby być samoobsługowy.
+  # NIE wpisuje się tu sekretów: ConfigMapa jest jawna i leży w gicie.
+  env: {}
+
+  # Źródła zewnętrzne, nadpisujące powyższe. `secret` wskazuje SealedSecret
+  # dostarczony przez tenanta.
   envFrom:
     configMap: ~
     secret: ~

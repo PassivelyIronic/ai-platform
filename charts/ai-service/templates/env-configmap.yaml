@@ -1,0 +1,17 @@
+{{- with .Values.runtime.env }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ai-service.name" $ }}-env
+  labels:
+    {{- include "ai-service.labels" $ | nindent 4 }}
+  annotations:
+    # Wave 0: konfiguracja musi istnieć przed czymkolwiek, co ją czyta.
+    # Pod z envFrom wskazującym nieistniejącą ConfigMapę nie startuje —
+    # utyka w CreateContainerConfigError, co wygląda na problem z obrazem.
+    argocd.argoproj.io/sync-wave: "0"
+data:
+  {{- range $key, $value := . }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}

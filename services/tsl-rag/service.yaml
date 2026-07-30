@@ -40,8 +40,21 @@ runtime:
     startupSeconds: 150
     readinessInitialDelay: 60
 
+  # Konfiguracja jawna — chart renderuje z niej ConfigMapę `tsl-rag-env`.
+  # `Settings` aplikacji ma `extra="forbid"`, więc zmienna bez odpowiednika
+  # w settings.py zatrzyma start poda. To celowe: literówka ma zatrzymać
+  # deployment, a nie zostać po cichu zignorowana.
+  # POSTGRES_DSN świadomie NIE jest tutaj — niesie hasło, a ConfigMapa jest jawna
+  # i leży w gicie. Idzie razem z kluczem providera przez SealedSecret poniżej.
+  env:
+    EMBEDDING_PROVIDER: local
+    CHAT_PROVIDER: openrouter
+    OPENROUTER_CHAT_MODEL: nvidia/nemotron-nano-9b-v2:free
+    LLM_SYSTEM_PREFIX: /no_think        # 5× szybciej na tym modelu (run_017 vs run_018)
+    LOG_JSON: "true"
+
+  # Klucz providera generacji i hasło API. SealedSecret, nigdy ConfigMapa.
   envFrom:
-    configMap: tsl-rag-env
     secret: tsl-rag-secrets
 
 database:

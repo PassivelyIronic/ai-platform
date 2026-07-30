@@ -79,3 +79,28 @@ dojechać do klastra i tam zawisnąć.
 {{- fail (printf "runtime.cache.enabled=true przy runtime.replicas=%d wymaga accessMode ReadWriteMany. Przy ReadWriteOnce drugi pod nie wystartuje. Wybierz: replicas=1, albo StorageClass z RWX, albo cache.enabled=false (kosztem ~1.1 GB pobierania przy każdym starcie poda)." (int .Values.runtime.replicas)) -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Wspólny blok envFrom dla API i bramki. Bramka MUSI dostać tę samą konfigurację
+co API — inaczej ocenia inne środowisko, niż to, które promuje.
+
+Kolejność ma znaczenie: ConfigMapa renderowana z kontraktu jest pierwsza,
+zewnętrzne źródła nadpisują ją później. Dzięki temu tenant może nadpisać
+pojedynczą wartość, nie kopiując całej reszty.
+*/}}
+{{- define "ai-service.envFrom" -}}
+{{- if .Values.runtime.env }}
+- configMapRef:
+    name: {{ include "ai-service.name" . }}-env
+{{- end }}
+{{- with .Values.runtime.envFrom }}
+{{- if .configMap }}
+- configMapRef:
+    name: {{ .configMap }}
+{{- end }}
+{{- if .secret }}
+- secretRef:
+    name: {{ .secret }}
+{{- end }}
+{{- end }}
+{{- end -}}

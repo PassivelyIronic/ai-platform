@@ -47,17 +47,8 @@ spec:
           # Katalog roboczy bywa jedynym miejscem, z którego da się znaleźć
           # zestaw ewaluacyjny — gdy jest do obrazu kopiowany, a nie instalowany.
           workingDir: {{ $gate.workingDir | default "/app" | quote }}
-          {{- with .Values.runtime.envFrom }}
           envFrom:
-            {{- if .configMap }}
-            - configMapRef:
-                name: {{ .configMap }}
-            {{- end }}
-            {{- if .secret }}
-            - secretRef:
-                name: {{ .secret }}
-            {{- end }}
-          {{- end }}
+            {{- include "ai-service.envFrom" . | nindent 12 }}
           {{- if .Values.runtime.cache.enabled }}
           env:
             - name: HF_HOME
