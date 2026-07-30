@@ -29,20 +29,24 @@ spec:
     spec:
       project: default
 
-      # Dwa źródła, nie jedno: chart mieszka w charts/ai-service, a kontrakt
-      # w services/<tenant>/. Odwołanie `$values` jest udokumentowanym sposobem
-      # sięgnięcia po plik values leżący poza katalogiem charta — ścieżki
-      # relatywne z `../..` bywały blokowane jako wychodzące poza zakres.
-      sources:
-        - repoURL: https://github.com/PassivelyIronic/ai-platform.git
-          targetRevision: main
-          path: charts/ai-service
-          helm:
-            valueFiles:
-              - "$values/services/{{.path.basename}}/service.yaml"
-        - repoURL: https://github.com/PassivelyIronic/ai-platform.git
-          targetRevision: main
-          ref: values
+      # JEDNO źródło, mimo że chart i kontrakt leżą w różnych katalogach.
+      #
+      # Wariant z dwoma źródłami i odwołaniem `$values` wygląda czyściej, ale
+      # ArgoCD odmawia, gdy dwa źródła TEGO SAMEGO repozytorium rozwiążą się do
+      # różnych rewizji — a dzieje się to za każdym razem, gdy odświeżenie
+      # wyprzedzi zapisaną rewizję aplikacji: „cannot reference a different
+      # revision of the same repository". Objaw jest przejściowy i przez to
+      # mylący: synchronizacja stoi, a manifesty są poprawne.
+      #
+      # Ścieżka relatywna wychodząca w górę jest dopuszczalna, dopóki nie opuszcza
+      # repozytorium — a tu nie opuszcza.
+      source:
+        repoURL: https://github.com/PassivelyIronic/ai-platform.git
+        targetRevision: main
+        path: charts/ai-service
+        helm:
+          valueFiles:
+            - "../../services/{{.path.basename}}/service.yaml"
 
       destination:
         server: https://kubernetes.default.svc
