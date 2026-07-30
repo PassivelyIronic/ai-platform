@@ -35,6 +35,14 @@ spec:
           volumeMounts:
             - name: dump
               mountPath: /shared
+          # ResourceQuota z limitami compute wymaga deklaracji od KAŻDEGO
+          # kontenera, także inicjalizacyjnego. Bez tego pod nie powstaje w ogóle,
+          # a Job pokazuje `Running 0/1` — objaw wyglądający na wolny start,
+          # nie na odrzucenie przez quotę. Kopiowanie 1.8 MB nie potrzebuje
+          # więcej niż tyle.
+          resources:
+            requests: { memory: 16Mi, cpu: 10m }
+            limits: { memory: 64Mi, cpu: 100m }
 
       containers:
         - name: restore

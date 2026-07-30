@@ -1,0 +1,30 @@
+{{- if .Values.resourceQuota.enabled }}
+# Siatka bezpieczeństwa pod ResourceQuotę.
+#
+# Quota z limitami compute odrzuca każdy pod, w którym choć jeden kontener nie
+# deklaruje requests i limits — łącznie z kontenerami inicjalizacyjnymi. Odrzucenie
+# nie jest widoczne w Podach, bo Pod nigdy nie powstaje: kontroler Joba albo
+# Deploymentu raportuje `0/1` i wygląda to na wolny start, a nie na odmowę.
+#
+# LimitRange nadaje wartości domyślne, więc brak deklaracji przestaje być awarią,
+# a staje się domyślną wartością. Chart deklaruje zasoby jawnie wszędzie, gdzie
+# sam tworzy kontenery — to jest zabezpieczenie na wypadek, gdy pojawi się
+# kontener, którego chart nie kontroluje.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "ai-service.name" . }}
+  labels:
+    {{- include "ai-service.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      default:
+        cpu: 500m
+        memory: 512Mi
+{{- end }}
