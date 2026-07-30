@@ -33,11 +33,19 @@ runtime:
     enabled: true
     size: 2Gi
 
-  # UWAGA: te liczby pochodzą z pomiaru na maszynie deweloperskiej (7.7 s na
-  # wczytanie modelu). Na ARM (Oracle A1.Flex) będą inne i D-002 wymaga POMIARU
-  # przed ich ustawieniem. Do tego czasu są zapasem, nie wynikiem.
+  # ZMIERZONE na klastrze 2026-07-30, nie założone: od startu kontenera do
+  # gotowości poda **122 s** przy PUSTYM cache'u wag (pobranie ~1.1 GB
+  # z Hugging Face + wczytanie modelu + budowa indeksu BM25).
+  #
+  # Poprzednia wartość 150 s zostawiała 28 s zapasu, czyli 19% — za mało jak
+  # na krok, którego czas zależy od przepustowości sieci. Świeży namespace na
+  # wolniejszym łączu wywaliłby startupProbe i wpadł w pętlę restartów, przy
+  # czym każdy restart zaczynałby pobieranie od nowa.
+  #
+  # Kolejne starty są wielokrotnie szybsze, bo cache jest już na PVC — ale
+  # probe musi pokrywać przypadek najgorszy, nie typowy.
   probes:
-    startupSeconds: 150
+    startupSeconds: 300
     readinessInitialDelay: 60
 
   # Konfiguracja jawna — chart renderuje z niej ConfigMapę `tsl-rag-env`.

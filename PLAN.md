@@ -29,19 +29,19 @@ Legenda: `[x]` zrobione i zweryfikowane, `[~]` częściowo — z opisem, czego b
 
 ## Phase 1 — GitOps + self-service onboarding (tydz. 5–6)
 
-- [ ] ArgoCD na klastrze — `bootstrap/` w tym repo stawia k3d (1 serwer + 2 agenty) i instaluje ArgoCD jedną komendą (D-021). Osobne repo provisioningowe nie powstaje
-- [ ] App-of-apps **tylko dla komponentów platformowych** (ArgoCD, kube-prometheus-stack, Rollouts, SealedSecrets)
-- [ ] **ApplicationSet z git directory generatorem** na `services/*/` (D-009), namespace per tenant
-- [ ] Chart: StatefulSet Postgres/pgvector + init (`CREATE EXTENSION vector`) + **idempotentny restore Job** ciągnący dump z OCI (D-015)
-- [ ] Sync waves: 0 Postgres → 1 restore → 2 API/UI → PostSync bramka. Bez tego bramka wystartuje na pustej bazie
-- [ ] Probe'y wg czasów zmierzonych **na tym, na czym to biegnie** — po D-021 jest to amd64 w k3d, nie ARM. Wartości w kontrakcie pochodzą dziś z maszyny deweloperskiej i są zapasem, nie pomiarem. `/ready` nigdy jako liveness (już egzekwowane przez chart)
-- [ ] PVC na cache HF (`HF_HOME`) — bez niego każdy restart ciągnie 1.1 GB
-- [ ] Onboarding tenanta #1 wyłącznie przez dodanie `services/tsl-rag/service.yaml`
+- [x] ArgoCD na klastrze — `bootstrap/` stawia k3d (1 serwer + 2 agenty) i instaluje ArgoCD jedną komendą (D-021). Osobne repo provisioningowe nie powstaje
+- [x] App-of-apps **tylko dla komponentów platformowych** — kube-prometheus-stack, Rollouts, SealedSecrets, wszystkie `Synced/Healthy`
+- [x] **ApplicationSet z git directory generatorem** na `services/*/` (D-009), namespace per tenant. Drugi ApplicationSet nad `secrets/*/` — SealedSecrety to inny rodzaj źródła niż chart z values. JEDNO źródło na Application, nie dwa: ArgoCD odmawia, gdy dwa źródła tego samego repo rozwiążą się do różnych rewizji
+- [x] Chart: StatefulSet Postgres/pgvector + init (`CREATE EXTENSION vector`) + **idempotentny restore Job** ciągnący dump z OCI (D-015) — zasiedlił 438 wierszy bez ręcznej interwencji
+- [x] Sync waves: -1 quota/NetworkPolicy/LimitRange → 0 Postgres → 1 restore → 2 API → PostSync bramka. Zaobserwowane w tej kolejności na klastrze
+- [x] Probe'y wg czasów **zmierzonych**: 122 s od startu kontenera do gotowości przy pustym cache wag. `startupSeconds` podniesione 150 → 300, bo 19% zapasu na kroku zależnym od przepustowości sieci to za mało. `/ready` nigdy jako liveness — egzekwowane przez chart
+- [x] PVC na cache HF (`HF_HOME`) — współdzielony przez API i Job bramki
+- [x] Onboarding tenanta #1 wyłącznie przez dodanie `services/tsl-rag/service.yaml` + SealedSecrety w `secrets/tsl-rag/`
 - [ ] CI po buildzie otwiera PR bumpujący `image.tag` w kontrakcie (staging: automerge)
-- [ ] `selfHeal` + `prune`; test driftu: ręczna edycja → ArgoCD przywraca
-- [ ] ResourceQuota + NetworkPolicy per namespace (NetworkPolicy musi przepuścić scrape Prometheusa na `/metrics`)
+- [x] `selfHeal` + `prune`; test driftu przeprowadzony: `kubectl scale --replicas=3` cofnięte do 1 w 20 sekund
+- [x] ResourceQuota + NetworkPolicy + LimitRange per namespace. LimitRange doszedł po awarii: quota z limitami compute odrzuca pod, w którym initContainer nie deklaruje zasobów, a objawem jest Job w stanie `Running 0/1` bez żadnego poda
 
-**Acceptance:** świeży namespace dochodzi do stanu "API ready, baza z 438 chunkami" bez ręcznej interwencji i bez parserów PDF w klastrze. Usunięcie katalogu z `services/` usuwa serwis. Ponowny sync nie duplikuje wierszy w `document_chunks`.
+**Acceptance:** ✅ osiągnięte 2026-07-30 — świeży namespace doszedł do "API ready, baza z 438 chunkami, bramka zielona (recall@5 0.958)" bez ręcznej interwencji i bez parserów PDF w klastrze. Do sprawdzenia zostaje: usunięcie katalogu z `services/` usuwa serwis, ponowny sync nie duplikuje wierszy.
 
 ## Phase 2 — Bramka promocji (tydz. 6)
 
