@@ -1,8 +1,13 @@
-# ApplicationSet z generatorem katalogów: jeden Application na każdy katalog
-# w services/. Dodanie tenanta to dodanie katalogu z kontraktem — bez edycji
-# czegokolwiek tutaj (D-009). To jest mechanizm, na którym stoi teza
-# o samoobsłudze: gdyby onboarding wymagał dopisania Application, platforma
-# byłaby zbiorem manifestów z ładną nazwą.
+# ApplicationSet tenantów: jeden Application na KAŻDĄ PARĘ (tenant, środowisko).
+#
+# Dodanie tenanta to nadal dodanie katalogu z kontraktem — bez edycji czegokolwiek
+# tutaj (D-009). To jest mechanizm, na którym stoi teza o samoobsłudze: gdyby
+# onboarding wymagał dopisania Application, platforma byłaby zbiorem manifestów
+# z ładną nazwą.
+#
+# Wymiar środowiska doszedł razem z bramką promocji (D-022). Bez niego nie ma
+# dokąd promować: jeden namespace i jeden `image.tag` znaczą, że „promocja"
+# byłaby zmergowaniem taga prosto na to, co już działa.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
@@ -15,17 +20,28 @@ spec:
   goTemplateOptions: ["missingkey=error"]
 
   generators:
-    - git:
-        repoURL: https://github.com/PassivelyIronic/ai-platform.git
-        revision: main
-        directories:
-          - path: services/*
+    # Iloczyn kartezjański: katalogi w services/ × lista środowisk. Lista jest
+    # tutaj, a nie w kontrakcie, celowo — zbiór środowisk jest własnością
+    # platformy. Tenant, który mógłby sobie dodać własne, mógłby też sobie dodać
+    # takie, które omija prod (guardrail #6).
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/PassivelyIronic/ai-platform.git
+              revision: main
+              directories:
+                - path: services/*
+          - list:
+              elements:
+                - env: staging
+                - env: prod
 
   template:
     metadata:
-      name: "{{.path.basename}}"
+      name: "{{.path.basename}}-{{.env}}"
       labels:
         ai-platform.io/tenant: "{{.path.basename}}"
+        ai-platform.io/env: "{{.env}}"
     spec:
       project: default
 
@@ -45,15 +61,25 @@ spec:
         targetRevision: main
         path: charts/ai-service
         helm:
+          # Kolejność jest znacząca: nakładka środowiska nadpisuje kontrakt.
+          # Staging jedzie na samym kontrakcie — plik service.staging.yaml nie
+          # istnieje i nie ma istnieć, bo kontrakt JEST definicją stagingu.
           valueFiles:
             - "../../services/{{.path.basename}}/service.yaml"
+            - "../../services/{{.path.basename}}/service.{{.env}}.yaml"
+          # Potrzebne wyłącznie dla stagingu, któremu brakuje nakładki. Istnienie
+          # nakładki produkcyjnej NIE opiera się na tej fladze — wymusza je
+          # walidator kontraktów w CI. Gdyby opierało się tutaj, brak pliku
+          # dawałby prod cicho wdrożony z taga stagingu, czyli dokładnie ten
+          # skutek, przed którym broni bramka.
+          ignoreMissingValueFiles: true
 
       destination:
         server: https://kubernetes.default.svc
-        # Namespace = nazwa katalogu. Walidator kontraktu pilnuje, żeby zgadzała
-        # się z polem `name`, bo rozjazd wdrożyłby serwis gdzie indziej, niż mówi
-        # kontrakt.
-        namespace: "{{.path.basename}}"
+        # Namespace = katalog + środowisko. Walidator pilnuje, żeby nazwa katalogu
+        # zgadzała się z polem `name`, bo rozjazd wdrożyłby serwis gdzie indziej,
+        # niż mówi kontrakt.
+        namespace: "{{.path.basename}}-{{.env}}"
 
       syncPolicy:
         automated:

@@ -185,3 +185,22 @@ rollout: { strategy: canary, steps: [10, 50, 100], analysisStartAfterSeconds: 18
 **Scenariusze chaosu, które to środowisko odtwarza wiernie:** ubicie poda Postgresa (`/ready` 503, brak restart-loopa), wyczerpanie ResourceQuota przez jednego tenanta, zablokowanie egressu do providera generacji. To są trzy z czterech pozycji Phase 5 — czwarta, awaria węzła, wypada.
 
 **Furtka:** Oracle Always Free nadal jest możliwy, ręcznie i z procedurą w `docs/`, bez repozytorium provisioningowego. Ta decyzja tego nie zamyka, tylko przestaje na tym blokować Phase 1.
+
+## D-022: Podział na środowiska; kontrakt jest stagingiem, prod jest nakładką
+**Status:** accepted
+**Decision:** ApplicationSet tenantów generuje jeden Application na **parę (tenant, środowisko)** — generator macierzowy `services/*` × `[staging, prod]`, namespace `<tenant>-<env>`. `services/<tenant>/service.yaml` pozostaje pełnym kontraktem i **jest** definicją stagingu; obok niego stoi `service.prod.yaml` niosący wyłącznie to, co prod różni — dla tenanta #1 dokładnie `image.tag` i `gate.image`. Plik `service.staging.yaml` nie istnieje i nie ma istnieć. Sekrety przenoszą się do `secrets/<tenant>/<env>/` i są pieczętowane osobno dla każdego środowiska.
+
+**Rationale:** to jest dziura znaleziona, nie zaplanowana — żaden wcześniejszy wpis jej nie pokrywał. Phase 2 potrzebuje **dokąd** promować. Przy jednym Application na tenanta, jednym namespace i jednym `image.tag` „promocja" byłaby zmergowaniem taga prosto na to, co już działa: bramka odpalałaby się po wdrożeniu na jedyne istniejące środowisko, czyli oceniałaby stan, który już jest produkcją. Bramka blokująca promocję wymaga dwóch stanów, między którymi jest co blokować.
+
+**Dlaczego nakładka, a nie drugi pełny kontrakt ani `envs:` w kontrakcie:**
+- Drugi pełny kontrakt na prod to dwa opisy tego samego serwisu, rozjeżdżające się przy pierwszej zmianie runtime'u — ta sama klasa błędu co D-020 (kopia dokumentu) i 444 vs 438. Rozjazd oznaczałby, że staging przestaje cokolwiek dowodzić o prodzie.
+- Zbiór środowisk trafia do **listy w ApplicationSecie, nie do kontraktu**. Środowiska są własnością platformy: tenant, który mógłby sobie zadeklarować własne, mógłby też zadeklarować takie, które omija prod, albo prod bez bramki (guardrail #1 i #6).
+- Nakładka minimalna jest sama w sobie regułą: jeśli prod potrzebuje innych zasobów, innych probe'ów czy innej bazy niż staging, to staging nie jest już próbą generalną. Wąska nakładka sprawia, że taka rozbieżność jest widoczna w diffie PR-a, a nie ukryta w drugim komplecie 40 linii.
+
+**Nakładki nie dostają własnej schemy.** Walidator scala nakładkę z kontraktem (semantyką Helmowego wielokrotnego `--values`: mapy rekurencyjnie, listy w całości) i waliduje **wynik scalenia** pełną schemą i pełnym kompletem reguł międzypolowych. Druga schema byłaby kopią głównej z usuniętym `required` — 230 linii do zsynchronizowania. Ważniejszy skutek niż oszczędność linii: reguła „bramka jedzie na tym samym obrazie i tagu co API" (D-019) obowiązuje na prodzie tak samo jak na stagingu, więc nakładka bumpująca sam `image.tag` bez `gate.image` failuje PR, zamiast wypuścić na prod bramkę oceniającą poprzednią wersję. Zweryfikowane na czerwono dokładnie na tym przypadku.
+
+**Istnienie nakładki produkcyjnej wymusza walidator, nie flaga w ArgoCD.** `ignoreMissingValueFiles: true` jest w ApplicationSecie potrzebne wyłącznie dla stagingu, któremu brakuje nakładki z założenia. Gdyby to ta flaga decydowała o prodzie, usunięcie `service.prod.yaml` nie dałoby żadnego błędu — dałoby prod wdrożony po cichu z taga stagingu, czyli dokładnie ten skutek, przed którym broni bramka.
+
+**Koszt, znaleziony w trakcie: SealedSecrets są pieczętowane strict-scope**, czyli związane parą (nazwa, namespace). Zmiana nazw namespace'ów na `<tenant>-<env>` unieważnia istniejące pieczęcie. `--scope cluster-wide` rozwiązałoby to jedną flagą i zostało **odrzucone**: sekret odszyfrowywalny w dowolnym namespace znosi izolację tenantów, którą budują namespace per tenant, ResourceQuota i NetworkPolicy. Sekrety są więc pieczętowane dwa razy, per środowisko. Efekt uboczny jest zresztą stanem docelowym, nie podatkiem: prod ma mieć własny klucz providera i własne hasło bazy, nieznane ze stagingu.
+
+**Konsekwencja dla migracji klastra:** namespace `tsl-rag` zostaje osierocony i wymaga ręcznego `kubectl delete` — razem z PVC bazy i jej 438 wierszami. To jest bezpieczne dokładnie dlatego, że seed jest artefaktem OCI (D-015): świeży `tsl-rag-staging` odtwarza je restore Jobem, bez parserów i bez modelu.

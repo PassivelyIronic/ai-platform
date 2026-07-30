@@ -1,0 +1,20 @@
+# Nakładka produkcyjna tenanta #1.
+#
+# Scala się NA service.yaml (kontrakt = staging). Niesie wyłącznie to, co różni
+# prod od stagingu — a różni go dokładnie jedna rzecz: która wersja obrazu tu
+# stoi. Wszystko poza tym jest wspólne z założenia; gdyby prod potrzebował innej
+# konfiguracji runtime'u, staging przestałby o nim cokolwiek dowodzić.
+#
+# Ten plik bumpuje WYŁĄCZNIE PR promocyjny, otwierany po zielonej bramce na
+# stagingu. Ręczna zmiana taga tutaj to wdrożenie na prod z pominięciem bramki —
+# czyli obejście jedynego mechanizmu, dla którego ta platforma istnieje.
+#
+# Walidator scala ten plik z kontraktem i waliduje WYNIK scalenia pełną schemą,
+# więc reguła „gate.image == image.repo:image.tag" (D-019) obowiązuje na prodzie
+# tak samo jak na stagingu — dlatego oba pola muszą się tu ruszać razem.
+
+image:
+  tag: 63b44c4b5ee0e9e90dd37fa909a5b3168c86fd91
+
+gate:
+  image: ghcr.io/passivelyironic/tsl-rag-api:63b44c4b5ee0e9e90dd37fa909a5b3168c86fd91

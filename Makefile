@@ -14,6 +14,12 @@ RENDER_DIR  := .render
 CONTRACTS   := $(wildcard services/*/service.yaml)
 SERVICES    := $(notdir $(patsubst %/,%,$(dir $(CONTRACTS))))
 
+# Zbior srodowisk MUSI zgadzac sie z generatorem listy w argocd/applicationset.yaml
+# i ze stala _ENVS w scripts/validate_contracts.py. Srodowisko obecne tam,
+# a nieobecne tu, po prostu nie bedzie renderowane lokalnie — czyli `make render`
+# przestanie pokazywac to, co naklada ArgoCD, nie zglaszajac przy tym bledu.
+ENVS        := staging prod
+
 # Wersje K8s, pod które walidujemy manifesty. Klaster docelowy to k3s
 # (Projekt 1); druga wersja pilnuje, żeby nic nie polegało na czymś, co
 # zniknie przy najbliższym upgradzie.
@@ -30,12 +36,12 @@ endif
 CLUSTER     := ai-platform
 ARGOCD_VER  := 7.7.11
 
-.PHONY: help tools contracts render lint validate clean cluster bootstrap tenants teardown $(addprefix render-,$(SERVICES))
+.PHONY: help tools contracts render lint validate clean cluster bootstrap tenants teardown
 
 help:
 	@echo make tools     - sprawdza, czy wymagane narzedzia sa na PATH
 	@echo make contracts - waliduje services/*/service.yaml schema kontraktu
-	@echo make render    - renderuje manifesty kazdego tenanta do $(RENDER_DIR)
+	@echo make render    - renderuje manifesty kazdej pary tenant-srodowisko do $(RENDER_DIR)
 	@echo make lint      - helm lint charta dla kazdego kontraktu
 	@echo make validate  - kubeconform na wyrenderowanych manifestach
 	@echo make clean     - usuwa $(RENDER_DIR)
@@ -79,24 +85,44 @@ tools:
 	@kubeconform -v
 	@yq --version
 
-RENDER_TARGETS := $(addprefix render-,$(SERVICES))
-LINT_TARGETS   := $(addprefix lint-,$(SERVICES))
+# Po jednym celu na PARE (tenant, srodowisko). Nazwa celu sklada sie z dwoch
+# czlonow, z ktorych oba moga zawierac myslnik, wiec regula wzorcowa `render-%`
+# nie ma jak ich rozdzielic — `render-tsl-rag-prod` rozbija sie na `tsl` i reszte
+# rownie dobrze jak na `tsl-rag` i `prod`. Dlatego reguly sa GENEROWANE przez
+# $(eval): oba czlony sa wtedy znane w chwili tworzenia regoly, a nie zgadywane
+# z jej nazwy.
+#
+# Przy okazji znika pulapka, ktora kosztowala juz raz pol godziny: GNU make
+# pomija wyszukiwanie regul niejawnych dla celow oznaczonych jako .PHONY, wiec
+# `render-%:` razem z .PHONY dawalo cel konczacy sie sukcesem BEZ uruchomienia
+# czegokolwiek. Reguly jawne tego problemu nie maja.
+RENDER_TARGETS := $(foreach s,$(SERVICES),$(foreach e,$(ENVS),render-$(s)-$(e)))
+LINT_TARGETS   := $(foreach s,$(SERVICES),$(foreach e,$(ENVS),lint-$(s)-$(e)))
 
 render: $(RENDER_TARGETS)
-	@echo Render zakonczony. Tenanci: $(if $(SERVICES),$(SERVICES),BRAK)
+	@echo Render zakonczony. Tenanci: $(if $(SERVICES),$(SERVICES),BRAK) x $(ENVS)
 
 lint: $(LINT_TARGETS)
 
-# Reguly STATYCZNE wzorcowe, nie niejawne. GNU make pomija wyszukiwanie regul
-# niejawnych dla celow oznaczonych jako .PHONY, wiec `render-%:` w polaczeniu
-# z .PHONY dawal cel, ktory konczyl sie sukcesem, nie uruchamiajac niczego.
-ifneq ($(SERVICES),)
-$(RENDER_TARGETS): render-%:
-	helm template $* $(CHART) --values services/$*/service.yaml --namespace $* --output-dir $(RENDER_DIR)
+# $(1) = tenant, $(2) = srodowisko.
+#
+# Naklodka jest dokladana warunkowo przez $(wildcard): staging jej nie ma
+# i miec nie bedzie, bo kontrakt JEST definicja stagingu. helm z --values
+# wskazujacym nieistniejacy plik konczy sie bledem, wiec warunek nie jest
+# kosmetyka.
+#
+# Kazda para renderuje sie do WLASNEGO katalogu. Bez tego prod nadpisalby
+# staging w miejscu, ktorego kubeconform juz nie odroznia — i walidowalibysmy
+# jedno srodowisko, meldujac dwa.
+define RENDER_RULE
+render-$(1)-$(2):
+	helm template $(1) $(CHART) --values services/$(1)/service.yaml $(if $(wildcard services/$(1)/service.$(2).yaml),--values services/$(1)/service.$(2).yaml) --namespace $(1)-$(2) --output-dir $(RENDER_DIR)/$(1)-$(2)
 
-$(LINT_TARGETS): lint-%:
-	helm lint $(CHART) --values services/$*/service.yaml
-endif
+lint-$(1)-$(2):
+	helm lint $(CHART) --values services/$(1)/service.yaml $(if $(wildcard services/$(1)/service.$(2).yaml),--values services/$(1)/service.$(2).yaml)
+endef
+
+$(foreach s,$(SERVICES),$(foreach e,$(ENVS),$(eval $(call RENDER_RULE,$(s),$(e)))))
 
 # --strict: nieznane pole w manifescie jest bledem, nie ostrzezeniem.
 # --ignore-missing-schemas przepuszcza CRD (Rollout, ServiceMonitor,

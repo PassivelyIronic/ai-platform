@@ -36,7 +36,7 @@ Legenda: `[x]` zrobione i zweryfikowane, `[~]` częściowo — z opisem, czego b
 - [x] Sync waves: -1 quota/NetworkPolicy/LimitRange → 0 Postgres → 1 restore → 2 API → PostSync bramka. Zaobserwowane w tej kolejności na klastrze
 - [x] Probe'y wg czasów **zmierzonych**: 122 s od startu kontenera do gotowości przy pustym cache wag. `startupSeconds` podniesione 150 → 300, bo 19% zapasu na kroku zależnym od przepustowości sieci to za mało. `/ready` nigdy jako liveness — egzekwowane przez chart
 - [x] PVC na cache HF (`HF_HOME`) — współdzielony przez API i Job bramki
-- [x] Onboarding tenanta #1 wyłącznie przez dodanie `services/tsl-rag/service.yaml` + SealedSecrety w `secrets/tsl-rag/`
+- [x] Onboarding tenanta #1 wyłącznie przez dodanie `services/tsl-rag/service.yaml` + SealedSecrety w `secrets/tsl-rag/` (po D-022: `secrets/tsl-rag/<env>/`)
 - [ ] CI po buildzie otwiera PR bumpujący `image.tag` w kontrakcie (staging: automerge)
 - [x] `selfHeal` + `prune`; test driftu przeprowadzony: `kubectl scale --replicas=3` cofnięte do 1 w 20 sekund
 - [x] ResourceQuota + NetworkPolicy + LimitRange per namespace. LimitRange doszedł po awarii: quota z limitami compute odrzuca pod, w którym initContainer nie deklaruje zasobów, a objawem jest Job w stanie `Running 0/1` bez żadnego poda
@@ -45,6 +45,7 @@ Legenda: `[x]` zrobione i zweryfikowane, `[~]` częściowo — z opisem, czego b
 
 ## Phase 2 — Bramka promocji (tydz. 6)
 
+- [x] **Dwa środowiska, bo bramka musi mieć dokąd promować** (D-022). ApplicationSet generuje Application na parę (tenant, env), namespace `<tenant>-<env>`; kontrakt JEST stagingiem, `service.prod.yaml` niesie tylko `image.tag` + `gate.image`. Walidator scala nakładkę z kontraktem i sprawdza WYNIK pełną schemą — więc D-019 (bramka na tym samym tagu co API) obowiązuje też na prodzie, a nakładka bumpująca sam tag failuje PR. Koszt: SealedSecrety są strict-scope, więc idą per środowisko; `cluster-wide` odrzucone
 - [ ] `eval-gate` jako część charta: Job z ArgoCD PostSync hook (D-004), obraz i komenda z kontraktu, `needs: [database]`
 - [ ] **Platforma czyta wyłącznie exit code i timeout** (D-014). Zero parsowania progów po stronie platformy — to repo aplikacji ma `evals/thresholds.yaml` i własną zasadę ich zmiany
 - [ ] Bramka w CI: workflow czeka na wynik Joba; pass → PR promujący na prod, fail → blokada + logi Joba w komentarzu
