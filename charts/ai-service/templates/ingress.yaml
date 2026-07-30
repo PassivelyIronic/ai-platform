@@ -1,0 +1,40 @@
+{{- $ingress := .Values.ingress | default dict -}}
+{{- if and $ingress.enabled $ingress.host }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ai-service.name" . }}
+  labels:
+    {{- include "ai-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    {{- with $ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with $ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ $ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ai-service.name" . }}
+                port:
+                  name: http
+  {{- with $ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- else if $ingress.enabled }}
+{{/*
+Ingress włączony, ale bez hosta. Reguła bez hosta łapie CAŁY ruch wchodzący
+na kontroler, więc przy drugim tenancie jeden serwis przejąłby ruch drugiego —
+cicho i zależnie od kolejności tworzenia. Zamiast tego nie renderujemy nic.
+*/}}
+{{- end }}

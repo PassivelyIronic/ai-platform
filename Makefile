@@ -48,16 +48,24 @@ tools:
 	@kubeconform -v
 	@yq --version
 
-render: $(addprefix render-,$(SERVICES))
+RENDER_TARGETS := $(addprefix render-,$(SERVICES))
+LINT_TARGETS   := $(addprefix lint-,$(SERVICES))
+
+render: $(RENDER_TARGETS)
 	@echo Render zakonczony. Tenanci: $(if $(SERVICES),$(SERVICES),BRAK)
 
-render-%:
+lint: $(LINT_TARGETS)
+
+# Reguly STATYCZNE wzorcowe, nie niejawne. GNU make pomija wyszukiwanie regul
+# niejawnych dla celow oznaczonych jako .PHONY, wiec `render-%:` w polaczeniu
+# z .PHONY dawal cel, ktory konczyl sie sukcesem, nie uruchamiajac niczego.
+ifneq ($(SERVICES),)
+$(RENDER_TARGETS): render-%:
 	helm template $* $(CHART) --values services/$*/service.yaml --namespace $* --output-dir $(RENDER_DIR)
 
-lint: $(addprefix lint-,$(SERVICES))
-
-lint-%:
+$(LINT_TARGETS): lint-%:
 	helm lint $(CHART) --values services/$*/service.yaml
+endif
 
 # --strict: nieznane pole w manifescie jest bledem, nie ostrzezeniem.
 # --ignore-missing-schemas przepuszcza CRD (Rollout, ServiceMonitor,

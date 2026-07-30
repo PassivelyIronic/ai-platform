@@ -13,7 +13,16 @@ image:
   tag: 63b44c4b5ee0e9e90dd37fa909a5b3168c86fd91
 
 runtime:
-  replicas: 2
+  # JEDNA replika, nie dwie — wymuszone przez cache wag modelu poniżej.
+  # Wolumen ReadWriteOnce montuje się tylko na jednym węźle, a `local-path`
+  # z klastra docelowego nie oferuje ReadWriteMany, więc druga replika zawisłaby
+  # w Pending. Chart odmawia wyrenderowania takiej kombinacji.
+  #
+  # Koszt jest niski i zgodny z tym, co i tak wiadomo o tej aplikacji: wąskim
+  # gardłem jest dzienny limit providera generacji, nie CPU poda (D-017), więc
+  # druga replika nie kupowała przepustowości. Kupowała dostępność przy awarii
+  # węzła — i to jest realna strata, do odzyskania razem ze StorageClass RWX.
+  replicas: 1
   resources:
     requests: { memory: 1Gi, cpu: 500m }
     limits: { memory: 2Gi, cpu: "2" }

@@ -30,6 +30,12 @@ runtime:
     enabled: true
     size: 2Gi
     mountPath: /cache
+    # ReadWriteOnce montuje się tylko na jednym węźle, więc przy replicas > 1
+    # drugi pod zawisa w Pending. Chart odmawia wtedy renderowania — StorageClass
+    # `local-path` z klastra docelowego nie oferuje ReadWriteMany, więc wybór jest
+    # między jedną repliką a rezygnacją z cache'a.
+    accessMode: ReadWriteOnce
+    storageClass: ~
 
   # Wartości domyślne z pomiaru na maszynie deweloperskiej: 7.7 s na wczytanie
   # modelu + pobranie wag przy pustym cache. Na ARM (A1.Flex) będzie wolniej —

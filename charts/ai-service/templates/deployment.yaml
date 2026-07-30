@@ -1,0 +1,100 @@
+{{- include "ai-service.validateCache" . -}}
+{{- $cache := .Values.runtime.cache | default dict -}}
+{{- $probes := .Values.runtime.probes | default dict -}}
+{{- $paths := .Values.runtime.paths -}}
+{{- $port := .Values.runtime.port | int -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ai-service.name" . }}
+  labels:
+    {{- include "ai-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  annotations:
+    # API wstaje po Postgresie i po restore — inaczej warmup() zobaczy pustą bazę.
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: {{ .Values.runtime.replicas }}
+  selector:
+    matchLabels:
+      {{- include "ai-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ai-service.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+        - name: api
+          image: {{ include "ai-service.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: {{ $port }}
+          {{- with .Values.runtime.envFrom }}
+          envFrom:
+            {{- if .configMap }}
+            - configMapRef:
+                name: {{ .configMap }}
+            {{- end }}
+            {{- if .secret }}
+            - secretRef:
+                name: {{ .secret }}
+            {{- end }}
+          {{- end }}
+          {{- if $cache.enabled }}
+          env:
+            # Katalog wag modelu. Obraz celowo ich nie zawiera — ważyłby ~2 GB
+            # więcej, a wagi zmieniają się raz na kilka miesięcy.
+            - name: HF_HOME
+              value: {{ printf "%s/huggingface" ($cache.mountPath | default "/cache") | quote }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.runtime.resources | nindent 12 }}
+
+          # Trzy sondy, trzy różne pytania — i celowo NIE ta sama ścieżka.
+          #
+          # startup: „czy proces w ogóle wstał". Model embeddingów ładuje się
+          # kilkadziesiąt sekund, a przy pustym cache dochodzi pobranie ~1.1 GB.
+          # Dopóki startup nie przejdzie, liveness i readiness są wstrzymane.
+          startupProbe:
+            httpGet:
+              path: {{ $paths.liveness }}
+              port: http
+            periodSeconds: 5
+            failureThreshold: {{ div (int ($probes.startupSeconds | default 150)) 5 }}
+
+          # liveness: /health, NIGDY /ready. /ready odpytuje bazę i provider
+          # embeddingów, więc jako liveness restartowałby pody w pętli przy
+          # chwilowo niedostępnej bazie — zamiast tylko wypiąć je z Service.
+          livenessProbe:
+            httpGet:
+              path: {{ $paths.liveness }}
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+
+          # readiness: /ready. 503 przy niedostępnej bazie jest tu POŻĄDANE.
+          readinessProbe:
+            httpGet:
+              path: {{ $paths.readiness }}
+              port: http
+            initialDelaySeconds: {{ $probes.readinessInitialDelay | default 60 }}
+            periodSeconds: 10
+            failureThreshold: 3
+
+          {{- if $cache.enabled }}
+          volumeMounts:
+            - name: hf-cache
+              mountPath: {{ $cache.mountPath | default "/cache" }}
+          {{- end }}
+      {{- if $cache.enabled }}
+      volumes:
+        - name: hf-cache
+          persistentVolumeClaim:
+            claimName: {{ include "ai-service.name" . }}-hf-cache
+      {{- end }}

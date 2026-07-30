@@ -1,0 +1,26 @@
+{{- $sm := .Values.serviceMonitor | default dict -}}
+{{- if $sm.enabled }}
+# Wymaga CRD z kube-prometheus-stack, instalowanego przez app-of-apps
+# komponentów platformy. kubeconform nie zna tego schematu — stąd
+# -ignore-missing-schemas w `make validate`.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "ai-service.name" . }}
+  labels:
+    {{- include "ai-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  selector:
+    matchLabels:
+      {{- include "ai-service.selectorLabels" . | nindent 6 }}
+  endpoints:
+    # /metrics jest nieautoryzowany z założenia: scraper nie może zależeć
+    # od sekretu aplikacji. NetworkPolicy musi to przepuścić z namespace'u
+    # monitoringu i tylko stamtąd.
+    - port: http
+      path: {{ .Values.runtime.paths.metrics }}
+      interval: {{ $sm.interval | default "30s" }}
+{{- end }}

@@ -45,7 +45,12 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "size": { "$ref": "#/$defs/quantity" },
-            "mountPath": { "type": "string", "pattern": "^/" }
+            "mountPath": { "type": "string", "pattern": "^/" },
+            "accessMode": {
+              "description": "ReadWriteOnce przy replicas > 1 zawiesza drugi pod w Pending — chart odmawia wtedy renderowania.",
+              "enum": ["ReadWriteOnce", "ReadWriteMany"]
+            },
+            "storageClass": { "$ref": "#/$defs/k8sName" }
           }
         },
         "probes": {

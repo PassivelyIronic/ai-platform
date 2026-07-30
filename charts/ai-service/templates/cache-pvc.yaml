@@ -1,0 +1,28 @@
+{{- $cache := .Values.runtime.cache | default dict -}}
+{{- if $cache.enabled }}
+{{- include "ai-service.validateCache" . -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ai-service.name" . }}-hf-cache
+  labels:
+    {{- include "ai-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  annotations:
+    # Wolumen musi istnieć przed podem API, ale po bazie — ta sama fala co API
+    # wystarcza, bo pod i tak czeka na bind.
+    argocd.argoproj.io/sync-wave: "2"
+    # PVC przeżywa usunięcie Application. Cache wag jest tani do odtworzenia,
+    # ale odtworzenie kosztuje ~1.1 GB transferu na każdy pod, więc kasowanie go
+    # przy każdym prune jest droższe niż zostawienie.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ $cache.accessMode | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ $cache.size | default "2Gi" }}
+  {{- with $cache.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}
