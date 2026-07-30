@@ -143,7 +143,7 @@ rollout: { strategy: canary, steps: [10, 50, 100], analysisStartAfterSeconds: 18
 **Warunek:** brak HPA wymaga akapitu "dlaczego nie po CPU" w README. Bez niego wygląda na niedoróbkę zamiast na decyzję — a jest to jeden z lepszych akapitów, jakie to repo może mieć.
 
 ## D-018: Granica infra ↔ platforma; repo Projektu 1 zmienia nazwę
-**Status:** accepted
+**Status:** **superseded by D-021** (podział przestaje istnieć; granica opisana tu pozostaje trafnym opisem tego, czego platforma NIE robi)
 **Decision:** repo `rag-on-k8s` → `platform-infra`. Granica: **co jest potrzebne, żeby ArgoCD wstało, należy do `platform-infra`; czym ArgoCD zarządza, należy do `ai-platform`.**
 - `platform-infra`: instancje Oracle A1.Flex, sieć i security lists, instalacja k3s i join nodów, StorageClass, ingress-nginx, cert-manager, bootstrap ArgoCD.
 - `ai-platform`: wszystko po tym, jak ArgoCD istnieje.
@@ -165,3 +165,23 @@ rollout: { strategy: canary, steps: [10, 50, 100], analysisStartAfterSeconds: 18
 **Decision:** `docs/KUBERNETES.md` istnieje w **jednym** miejscu — w repo tenanta. Kopia w korzeniu `ai-platform` znika i nie jest commitowana. Jeśli platforma potrzebuje odnośnika, jest nim jedno zdanie z nazwą repo i SHA commita, nie treść.
 **Rationale:** to jest ta sama zasada co D-007, zastosowana do dokumentacji. Jeśli platforma potrzebuje czegoś o tenancie, to musi to być w `service.yaml` — a jeśli czegoś w kontrakcie nie ma, to jest dziura w kontrakcie, nie powód do trzymania kopii cudzego dokumentu. Datowany snapshot w drugim repo rozjedzie się z oryginałem; ta sama klasa błędu co 444 vs 438, `make ui` i `uv run` w §5. Trzy wystąpienia w jednym projekcie to nie jest przypadek, tylko wzorzec — kopia dokumentu to zobowiązanie do jej aktualizowania, którego nikt nie dotrzymuje.
 **Konsekwencja:** poprawka komendy z §5 (`uv run` → `python -m`) idzie wyłącznie do repo tenanta, razem z aktualizacją daty w nagłówku dokumentu. Zostawienie znanej nieprawdy pod banerem „SPRAWDŹ PRZED UŻYCIEM" jest gorsze niż edycja snapshotu.
+
+## D-021: Klaster developerski w repo platformy; `platform-infra` nie powstaje
+**Status:** accepted — **supersedes D-018**
+**Decision:** provisioning jako osobne repozytorium wypada z zakresu. `ai-platform` dostaje katalog `bootstrap/`, który stawia klaster k3d (1 serwer + 2 agenty, k3s v1.31) i pierwszą instancję ArgoCD. Wszystko po tym momencie idzie przez git — `bootstrap/` jest jedynym miejscem w projekcie, gdzie cokolwiek wykonuje się imperatywnie.
+**Rationale:** blokerem Phase 1 nigdy nie był brak repozytorium, tylko brak działającego ArgoCD. Te dwie rzeczy dało się rozdzielić i rozdzielenie wychodzi na korzyść:
+- **Dla oglądającego repo** klaster wstający jedną komendą z tego samego repozytorium jest wart więcej niż klaster wymagający konta w Oracle. Pierwsze da się sprawdzić, drugie trzeba przyjąć na słowo.
+- **k3d to k3s w Dockerze**, czyli ta sama dystrybucja, którą platforma zakłada jako docelową. Odtwarza `local-path` (ReadWriteOnce i przywiązanie wolumenu do węzła), Traefika i egzekwowanie NetworkPolicy — czyli dokładnie te własności, na których ten projekt realnie się potknął.
+- **Trzy węzły, nie jeden.** Przy jednym każdy pod ląduje tam, gdzie wolumen, więc konflikt node affinity na PVC — ten, przez który tenant #1 ma jedną replikę — byłby nieodtwarzalny. Środowisko, na którym znany błąd nie może się powtórzyć, nie weryfikuje niczego.
+
+**Czego to środowisko nie dowodzi** (do trzymania w README, nie do przemilczenia — guardrail #5):
+- arm64 w runtime. Obrazy są budowane multi-arch, ale uruchamiany jest wyłącznie amd64: wariant ARM jest zbudowany, nie sprawdzony.
+- Czasów startu na docelowym sprzęcie. Probe'y zmierzone tutaj opisują amd64 z lokalnym dyskiem, nie A1.Flex — poprawka do D-002: „zmierz na tym, na czym uruchamiasz", a nie „zmierz na ARM".
+- Publicznego Ingressu z TLS. Traefik odpowiada na `*.localhost`; cert-manager i Let's Encrypt wypadają z zakresu.
+- Awarii węzła. Trzy kontenery na jednym hoście dzielą jego los.
+
+**Co zostaje nietknięte:** teza projektu. Deterministyczna bramka blokująca promocję, kontrakt jako jedyny interfejs, canary z automatycznym rollbackiem i drugi tenant dowodzący generyczności nie zależą od tego, gdzie stoi klaster. Nagranie „od pustego katalogu do prod, demo sabotażu, auto-rollback" powstaje tu tak samo.
+
+**Scenariusze chaosu, które to środowisko odtwarza wiernie:** ubicie poda Postgresa (`/ready` 503, brak restart-loopa), wyczerpanie ResourceQuota przez jednego tenanta, zablokowanie egressu do providera generacji. To są trzy z czterech pozycji Phase 5 — czwarta, awaria węzła, wypada.
+
+**Furtka:** Oracle Always Free nadal jest możliwy, ręcznie i z procedurą w `docs/`, bez repozytorium provisioningowego. Ta decyzja tego nie zamyka, tylko przestaje na tym blokować Phase 1.

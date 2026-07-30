@@ -1,0 +1,55 @@
+# ArgoCD na klastrze developerskim.
+#
+# To jest jedyny komponent instalowany IMPERATYWNIE — resztą platformy zarządza
+# już on sam, przez app-of-apps. Ktoś musi położyć pierwszy kamień; wszystko
+# po nim idzie przez git.
+
+# Serwer bez TLS, bo ruch i tak wchodzi przez Traefika, a podwójne TLS na
+# localhoście kupuje wyłącznie ostrzeżenia przeglądarki.
+configs:
+  params:
+    server.insecure: true
+
+  cm:
+    # Nazwa instancji w etykietach zasobów. Bez tego dwa ArgoCD widzące ten sam
+    # klaster przepisywałyby sobie nawzajem zasoby.
+    application.instanceLabelKey: argocd.argoproj.io/instance
+
+    # Widok drzewa zasobów bez szumu z Jobów-hooków, które już się wykonały.
+    resource.exclusions: |
+      - apiGroups: ["coordination.k8s.io"]
+        kinds: ["Lease"]
+        clusters: ["*"]
+
+server:
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hostname: argocd.localhost
+
+# Klaster developerski nie potrzebuje redundancji kontrolera — potrzebuje
+# szybkiego startu i małego apetytu na pamięć, bo dzieli hosta z Dockerem,
+# trzema węzłami i obrazem aplikacji ważącym 2.6 GB.
+controller:
+  resources:
+    requests: { memory: 256Mi, cpu: 100m }
+    limits: { memory: 1Gi, cpu: "1" }
+
+repoServer:
+  resources:
+    requests: { memory: 128Mi, cpu: 50m }
+    limits: { memory: 512Mi, cpu: "1" }
+
+redis:
+  resources:
+    requests: { memory: 64Mi, cpu: 50m }
+    limits: { memory: 256Mi, cpu: 500m }
+
+applicationSet:
+  resources:
+    requests: { memory: 64Mi, cpu: 50m }
+    limits: { memory: 256Mi, cpu: 500m }
+
+dex:
+  # Brak SSO na kluczowym środowisku developerskim — jeden użytkownik admin.
+  enabled: false

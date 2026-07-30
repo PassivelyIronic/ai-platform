@@ -4,7 +4,9 @@
 
 A minimal **internal AI platform**: a self-service path for shipping LLM services to Kubernetes. A developer declares a service in one YAML contract and opens a PR; the platform builds it, seeds its database, deploys to staging, runs the service's own quality gate, promotes to production via canary, and monitors it. No `kubectl` on the consumer side.
 
-Runs on the cluster provisioned by `platform-infra` (DECISIONS D-018: that repo owns everything needed for ArgoCD to exist; this repo owns everything ArgoCD manages). Tenant #1 is `tsl-rag-v2`; tenant #2 exists to prove the contract is generic (DECISIONS D-010).
+Runs on k3s. The cluster is stood up by `bootstrap/` in this repo — k3d, three nodes, one command (DECISIONS D-021, superseding the separate provisioning repo of D-018). `bootstrap/` is the only place in the project where anything runs imperatively; everything past ArgoCD's existence goes through git. Tenant #1 is `tsl-rag-v2`; tenant #2 exists to prove the contract is generic (DECISIONS D-010).
+
+What that environment does **not** prove, and what the README must therefore not claim: arm64 at runtime (images are built multi-arch, only amd64 is exercised), startup timings on the target hardware, a public Ingress with TLS, or node failure. See `bootstrap/README.md`.
 
 The differentiator vs a standard delivery platform: **promotion is blocked by a deterministic quality gate**, and rollouts are canary with metric-based promotion.
 

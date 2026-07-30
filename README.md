@@ -30,9 +30,25 @@ mieszka w jednym miejscu — w repo tenanta: `PassivelyIronic/tsl-rag-v2`, `docs
 stan na `d9cf88f`. To, co z niego wynikło, jest już zapisane w kontrakcie, w charcie
 i w D-015; platforma trzyma odnośnik, nie kopię (D-020).
 
+## Środowisko
+
+Platforma działa na k3s. Klaster developerski stawia `bootstrap/` — k3d, trzy węzły,
+jedna komenda:
+
+```
+make cluster      # k3d: 1 serwer + 2 agenty
+make bootstrap    # ArgoCD + komponenty platformy
+make tenants      # ApplicationSet nad services/
+```
+
+Trzy węzły, nie jeden: przy jednym każdy pod ląduje tam, gdzie wolumen, więc konflikt
+node affinity na PVC byłby nieodtwarzalny. Czego to środowisko nie dowodzi — arm64
+w runtime, czasów startu na docelowym sprzęcie, publicznego Ingressu z TLS, awarii
+węzła — opisuje [`bootstrap/README.md`](bootstrap/README.md).
+
 ## Wymagane narzędzia
 
-`helm` ≥ 4.0 · `kubectl` · `kubeconform` · `yq` · `make` · `gh` · `docker`
+`helm` ≥ 4.0 · `kubectl` · `k3d` · `kubeconform` · `yq` · `make` · `gh` · `docker`
 
 Weryfikacja: `make tools`
 

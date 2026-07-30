@@ -29,12 +29,12 @@ Legenda: `[x]` zrobione i zweryfikowane, `[~]` częściowo — z opisem, czego b
 
 ## Phase 1 — GitOps + self-service onboarding (tydz. 5–6)
 
-- [ ] ArgoCD na klastrze (osobny namespace, Ingress `/argocd` za auth)
+- [ ] ArgoCD na klastrze — `bootstrap/` w tym repo stawia k3d (1 serwer + 2 agenty) i instaluje ArgoCD jedną komendą (D-021). Osobne repo provisioningowe nie powstaje
 - [ ] App-of-apps **tylko dla komponentów platformowych** (ArgoCD, kube-prometheus-stack, Rollouts, SealedSecrets)
 - [ ] **ApplicationSet z git directory generatorem** na `services/*/` (D-009), namespace per tenant
 - [ ] Chart: StatefulSet Postgres/pgvector + init (`CREATE EXTENSION vector`) + **idempotentny restore Job** ciągnący dump z OCI (D-015)
 - [ ] Sync waves: 0 Postgres → 1 restore → 2 API/UI → PostSync bramka. Bez tego bramka wystartuje na pustej bazie
-- [ ] Probe'y wg zmierzonych czasów na ARM: `startupProbe` pokrywający ~2 min, readiness `initialDelaySeconds` ≥ 60, **`/ready` nigdy jako liveness**
+- [ ] Probe'y wg czasów zmierzonych **na tym, na czym to biegnie** — po D-021 jest to amd64 w k3d, nie ARM. Wartości w kontrakcie pochodzą dziś z maszyny deweloperskiej i są zapasem, nie pomiarem. `/ready` nigdy jako liveness (już egzekwowane przez chart)
 - [ ] PVC na cache HF (`HF_HOME`) — bez niego każdy restart ciągnie 1.1 GB
 - [ ] Onboarding tenanta #1 wyłącznie przez dodanie `services/tsl-rag/service.yaml`
 - [ ] CI po buildzie otwiera PR bumpujący `image.tag` w kontrakcie (staging: automerge)

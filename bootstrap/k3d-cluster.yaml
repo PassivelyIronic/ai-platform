@@ -1,0 +1,43 @@
+# Konfiguracja klastra developerskiego.
+#
+# k3d to k3s w Dockerze — ta sama dystrybucja, którą platforma zakłada jako
+# docelową, więc odtwarza rzeczy, na których ten projekt realnie się potyka:
+# `local-path` jako domyślny StorageClass (czyli ReadWriteOnce i przywiązanie
+# wolumenu do węzła), Traefik jako kontroler Ingress, egzekwowanie NetworkPolicy.
+#
+# TRZY WĘZŁY, nie jeden. Przy jednym węźle wszystkie pody zawsze lądują tam,
+# gdzie wolumen, więc konflikt node affinity — ten sam, przez który tenant #1
+# zszedł do jednej repliki — nigdy by się nie ujawnił. Klaster, na którym błąd
+# jest niemożliwy do odtworzenia, nie jest środowiskiem testowym.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: ai-platform
+
+servers: 1
+agents: 2
+
+image: rancher/k3s:v1.31.4-k3s1
+
+ports:
+  # Traefik. 8080/8443 na hoście, bo 80/443 na Windowsie bywa zajęte.
+  - port: 8080:80
+    nodeFilters: [loadbalancer]
+  - port: 8443:443
+    nodeFilters: [loadbalancer]
+
+options:
+  k3s:
+    extraArgs:
+      # ServiceLB (klipper) jest zbędny — ruch wchodzi przez loadbalancer k3d.
+      - arg: --disable=servicelb
+        nodeFilters: [server:*]
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true
+
+registries:
+  # GHCR jest publiczny dla obu artefaktów tego projektu, więc klaster nie
+  # potrzebuje imagePullSecret. Gdyby pakiet wrócił do prywatnego, to jest
+  # miejsce, w którym dokłada się poświadczenia.
+  use: []
