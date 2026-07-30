@@ -12,16 +12,18 @@ Timebox: ~4 tygodnie (tydz. 5–8 wspólnej roadmapy). Tenant #1: `tsl-rag-v2`.
 
 ## Phase 0 — CI foundation + kontrakt + seed pipeline (tydz. 5)
 
-- [ ] Reusable workflow: ruff + pytest + buildx multi-arch (arm64+amd64) + push GHCR, tag = git SHA
-- [ ] `tsl-rag-v2` wywołuje workflow; badge w README
+Legenda: `[x]` zrobione i zweryfikowane, `[~]` częściowo — z opisem, czego brakuje.
+
+- [x] Reusable workflow: ruff + pytest + buildx multi-arch (arm64+amd64) + push GHCR, tag = git SHA — `ai-platform/.github/workflows/service-ci.yml`. Tag bierze się z głowy gałęzi, nie z `github.sha`: przy `pull_request` to drugie wskazuje efemeryczny merge commit, którego nie ma w historii, czyli tag nie do zapinowania
+- [x] `tsl-rag-v2` wywołuje workflow — pierwszy zielony przebieg 2026-07-30 (lint 1m26s, build 12m50s, bramka 1m39s). **Badge w README tenanta wciąż do dodania**
 - [x] ~~Weryfikacja bramki w obrazie~~ — zrobione 2026-07-29, wynik negatywny: `evals/` nie było w obrazie, `uv` nie istnieje w runtime, komenda z `docs/KUBERNETES.md` §5 nie wykonuje się w ogóle (D-019)
-- [ ] `COPY evals/ ./evals/` do finalnego stage'a `docker/Dockerfile`; poprawka komendy w `docs/KUBERNETES.md` §5 (bez `uv`) + aktualizacja daty w nagłówku dokumentu. Wyłącznie w repo tenanta — kopia w korzeniu `ai-platform` znika (D-020)
-- [ ] **Smoke test bramki w workflow buildu**: świeżo zbudowany obraz uruchamia `python -m evals.run_retrieval_evals` przeciwko jednorazowemu Postgresowi zasiedlonemu seed dumpem. To jest właściwa naprawa — `COPY` naprawia dziś, smoke test uniemożliwia powtórkę
-- [ ] Job bramki w charcie ustawia `workingDir: /app` jawnie (`evals` jest kopiowany, nie instalowany — znajduje się przez cwd)
-- [ ] **JSON Schema dla `service.yaml`** (D-007) + walidacja w CI
+- [x] `COPY evals/ ./evals/` do finalnego stage'a `docker/Dockerfile`; poprawka komendy w `docs/KUBERNETES.md` §5 + data w nagłówku; kopia w `ai-platform` usunięta (D-020). PR #1. Przy okazji wyszło drugie dno: walidacja golden datasetu ciągnęła `fitz` przez `ingestion.cli`, więc sam `COPY` nie wystarczał — rejestr idzie teraz z `core.documents`
+- [x] **Smoke test bramki w workflow buildu** — bramka uruchamiana na świeżo zbudowanym obrazie przeciwko Postgresowi zasiedlonemu z artefaktu seed. Workflow sprawdza też zgodność `embedding-model` z labelem artefaktu (D-015)
+- [~] Job bramki w charcie ustawia `workingDir: /app` — jest w `values.yaml` jako default; sam szablon Joba powstanie razem z resztą szablonów charta
+- [x] **JSON Schema dla `service.yaml`** (D-007) + walidacja w CI — `schemas/service.schema.json` + `scripts/validate_contracts.py` + workflow `kontrakty`. Zweryfikowane, że blokuje: `latest`, `gate.image` różny od obrazu API, pole `thresholds` (D-014), brak bramki, `managed` bez seeda, kroki canary niekończące się na 100
 - [ ] Obraz `tsl-rag-ingest` (`uv sync --extra ingest`) + workflow produkujący `pg_dump -Fc` tabeli `document_chunks`, uruchamiany **tylko** przy zmianie `data/raw/`, chunkera lub modelu embeddingów (D-015)
-- [ ] Publikacja dumpu jako OCI artifact w GHCR, tag = hash korpusu/modelu/chunkera (D-016); metadane niosą `embedding_model`
-- [ ] `charts/ai-service` — szkielet: Deployment API, Service, Ingress, ServiceMonitor
+- [~] Publikacja dumpu jako OCI artifact w GHCR, tag = hash korpusu/parsera/chunkera/modelu (D-016); metadane niosą `embedding_model` — artefakt `tsl-rag-corpus:corpus-f646c99b8ebf` opublikowany i **wykorzystywany przez CI**, ale wyprodukowany ręcznie. Skrypt liczący tag jest w PR #2; automatyzacja produkcji to punkt wyżej
+- [~] `charts/ai-service` — szkielet: Deployment API, Service, Ingress, ServiceMonitor. Jest `Chart.yaml` i `values.yaml` z defaultami dla każdego pola kontraktu; `templates/` nadal puste
 
 **Acceptance:** push do `tsl-rag-v2` → zielony pipeline → obraz multi-arch z SHA w GHCR, bez ręcznych kroków. `helm template services/tsl-rag/service.yaml` renderuje kompletne manifesty, `kubeconform` je akceptuje. Zmiana jednego PDF-a w `data/raw/` produkuje nowy dump z nowym tagiem; zmiana samego kodu **nie** produkuje.
 

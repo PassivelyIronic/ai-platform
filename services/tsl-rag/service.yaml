@@ -1,0 +1,66 @@
+# Kontrakt tenanta #1. To jest JEDYNY plik, przez który ten serwis wchodzi na
+# platformę — żadnych ręcznych manifestów obok (guardrail #6).
+#
+# Walidowany przez schemas/service.schema.json w CI. Zły kontrakt failuje PR.
+
+name: tsl-rag
+owner: jakub
+
+image:
+  repo: ghcr.io/passivelyironic/tsl-rag-api
+  # Bumpowany wyłącznie przez CI po zielonym buildzie. Nigdy `latest`: rollback
+  # i analiza canary porównywałyby się do celu, który się przesuwa.
+  tag: 63b44c4b5ee0e9e90dd37fa909a5b3168c86fd91
+
+runtime:
+  replicas: 2
+  resources:
+    requests: { memory: 1Gi, cpu: 500m }
+    limits: { memory: 2Gi, cpu: "2" }
+
+  # Wagi modelu embeddingów. Bez cache'a każdy restart poda ciągnie ~1.1 GB
+  # z Hugging Face — obraz celowo ich nie zawiera, żeby nie ważył 2 GB więcej.
+  cache:
+    enabled: true
+    size: 2Gi
+
+  # UWAGA: te liczby pochodzą z pomiaru na maszynie deweloperskiej (7.7 s na
+  # wczytanie modelu). Na ARM (Oracle A1.Flex) będą inne i D-002 wymaga POMIARU
+  # przed ich ustawieniem. Do tego czasu są zapasem, nie wynikiem.
+  probes:
+    startupSeconds: 150
+    readinessInitialDelay: 60
+
+  envFrom:
+    configMap: tsl-rag-env
+    secret: tsl-rag-secrets
+
+database:
+  mode: managed
+  # Tag artefaktu liczony z zawartości korpusu, parsera, chunkera i konfiguracji
+  # embeddingów — nie z SHA obrazu API (D-016). Liczy go scripts/corpus_tag.py
+  # w repo tenanta.
+  seed: oci://ghcr.io/passivelyironic/tsl-rag-corpus:corpus-f646c99b8ebf
+  embeddingModel: intfloat/multilingual-e5-base
+
+# Kryteria tej bramki są dla platformy nieprzezroczyste. Progi mieszkają
+# w evals/thresholds.yaml w repo tenanta i mają tam własną zasadę zmiany;
+# platforma czyta wyłącznie exit code i timeout (D-014).
+gate:
+  # Ten sam obraz i tag co API — bramka ocenia dokładnie ten artefakt, który
+  # ma promować (D-019).
+  image: ghcr.io/passivelyironic/tsl-rag-api:63b44c4b5ee0e9e90dd37fa909a5b3168c86fd91
+  # Bez `uv` — nie ma go w warstwie runtime.
+  command: ["python", "-m", "evals.run_retrieval_evals"]
+  # evals/ jest kopiowany do obrazu, nie instalowany w venv, więc `python -m`
+  # znajduje pakiet wyłącznie przez cwd.
+  workingDir: /app
+  needs: [database]
+  timeoutSeconds: 300
+
+rollout:
+  strategy: canary
+  steps: [10, 50, 100]
+  # Pod potrzebuje ~2 min do gotowości. Analiza startująca od razu uznałaby
+  # zdrową wersję za zepsutą.
+  analysisStartAfterSeconds: 180

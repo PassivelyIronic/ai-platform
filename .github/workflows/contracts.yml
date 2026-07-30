@@ -1,0 +1,63 @@
+name: kontrakty
+
+# Walidacja kontraktów tenantów przy każdej zmianie w repo platformy.
+#
+# Sens: zły kontrakt ma failować PR, a nie klaster (DECISIONS D-007). Bez tego
+# kroku literówka w `service.yaml` ujawnia się dopiero jako Application
+# w stanie Degraded, po synchronizacji, w namespace, do którego użytkownik
+# platformy nie ma dostępu.
+#
+# Walidacja obejmuje też chart: kontrakt jest jego plikiem values (D-008), więc
+# kontrakt poprawny wobec schemy, ale nierenderowalny przez chart, jest nadal
+# zepsuty. `make render` produkuje lokalnie te same manifesty, które nakłada
+# ArgoCD, a kubeconform sprawdza, czy klaster w ogóle by je przyjął.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Walidacja kontraktów
+        run: make contracts
+
+      - name: Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Lint charta dla każdego kontraktu
+        run: make lint
+
+      # Chart nie ma jeszcze szablonów, więc render produkuje pusty katalog
+      # i kubeconform nie ma czego sprawdzać. Krok jest tu od początku celowo:
+      # ma zacząć realnie działać w momencie, w którym pojawi się pierwszy
+      # szablon, a nie zostać dopisany później, gdy już będzie co przepuścić.
+      - name: Render i walidacja manifestów
+        run: |
+          set -euo pipefail
+          make render
+          if [ -d .render ] && [ -n "$(find .render -name '*.yaml' -print -quit)" ]; then
+            curl -sSL -o kubeconform.tar.gz \
+              https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz
+            tar -xzf kubeconform.tar.gz kubeconform
+            ./kubeconform -strict -summary -ignore-missing-schemas .render
+          else
+            echo "Chart nie ma jeszcze szablonów — nic do walidacji."
+          fi

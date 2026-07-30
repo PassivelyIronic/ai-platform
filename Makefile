@@ -27,15 +27,21 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help tools render lint validate clean $(addprefix render-,$(SERVICES))
+.PHONY: help tools contracts render lint validate clean $(addprefix render-,$(SERVICES))
 
 help:
 	@echo make tools     - sprawdza, czy wymagane narzedzia sa na PATH
+	@echo make contracts - waliduje services/*/service.yaml schema kontraktu
 	@echo make render    - renderuje manifesty kazdego tenanta do $(RENDER_DIR)
 	@echo make lint      - helm lint charta dla kazdego kontraktu
 	@echo make validate  - kubeconform na wyrenderowanych manifestach
 	@echo make clean     - usuwa $(RENDER_DIR)
 	@echo Tenanci wykryci w services/: $(if $(SERVICES),$(SERVICES),BRAK)
+
+# Zaleznosci brane doraznie przez uv — repo platformy nie jest projektem
+# pythonowym i nie ma powodu, zeby zyskalo pyproject.toml dla jednego skryptu.
+contracts:
+	uv run --quiet --with jsonschema --with pyyaml python scripts/validate_contracts.py
 
 tools:
 	@helm version --short

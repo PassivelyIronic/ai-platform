@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PassivelyIronic/ai-platform/schemas/service.schema.json",
+  "title": "Kontrakt platformy — services/<name>/service.yaml",
+  "description": "Jedyny interfejs między tenantem a platformą. Zły kontrakt failuje PR, nie klaster (DECISIONS D-007). Uwaga dla edytujących: nie ma tu i nie będzie pola na progi bramki ani na parsowanie jej wyjścia — kryteria bramki są dla platformy nieprzezroczyste, widzi wyłącznie exit code i timeout (D-014).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "owner", "image", "database", "gate"],
+
+  "properties": {
+    "name": {
+      "description": "Nazwa tenanta = nazwa namespace'u, więc musi być poprawną etykietą RFC 1123.",
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "maxLength": 63
+    },
+
+    "owner": {
+      "description": "Kto dostaje alert. Serwis bez właściciela nie wchodzi na platformę.",
+      "type": "string",
+      "minLength": 1
+    },
+
+    "image": { "$ref": "#/$defs/imageRef" },
+
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requests", "limits"],
+          "properties": {
+            "requests": { "$ref": "#/$defs/resourceBlock" },
+            "limits": { "$ref": "#/$defs/resourceBlock" }
+          }
+        },
+        "cache": {
+          "description": "Cache wag modelu (HF_HOME). Bez niego każdy restart poda ciągnie ~1.1 GB.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "size": { "$ref": "#/$defs/quantity" },
+            "mountPath": { "type": "string", "pattern": "^/" }
+          }
+        },
+        "probes": {
+          "description": "Wartości do ustawienia PO POMIARZE na architekturze docelowej (D-002), nie z kopiuj-wklej.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "startupSeconds": { "type": "integer", "minimum": 1, "maximum": 1800 },
+            "readinessInitialDelay": { "type": "integer", "minimum": 0, "maximum": 600 }
+          }
+        },
+        "envFrom": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "configMap": { "$ref": "#/$defs/k8sName" },
+            "secret": { "$ref": "#/$defs/k8sName" }
+          }
+        },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "description": "managed → StatefulSet z charta, per tenant. external → DSN z Secreta, restore się nie wykonuje.",
+          "enum": ["managed", "external"]
+        },
+        "seed": {
+          "description": "Artefakt OCI z dumpem. Tag pochodzi z zawartości korpusu, modelu i chunkera — nigdy z SHA obrazu aplikacji (D-016).",
+          "type": "string",
+          "pattern": "^oci://[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+:[A-Za-z0-9._-]+$"
+        },
+        "embeddingModel": {
+          "description": "Musi zgadzać się z metadanymi dumpu. Niezgodność daje losowe wyniki i NIE zgłasza błędu (D-015).",
+          "type": "string",
+          "minLength": 1
+        },
+        "storage": { "$ref": "#/$defs/quantity" },
+        "externalSecret": { "$ref": "#/$defs/k8sName" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "managed" } }, "required": ["mode"] },
+          "then": {
+            "required": ["seed", "embeddingModel"],
+            "description": "Baza zarządzana bez seeda i bez modelu oznacza bramkę uruchomioną na pustej bazie."
+          }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "external" } }, "required": ["mode"] },
+          "then": { "required": ["externalSecret"] }
+        }
+      ]
+    },
+
+    "gate": {
+      "description": "Każdy tenant ma bramkę. Bez wyjątków, bez 'tymczasowo wyłączonej na czas onboardingu' (guardrail #1).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "command"],
+      "properties": {
+        "image": {
+          "description": "Ten sam obraz i tag co deployowane API (D-019). Sprawdzane przez walidator, nie przez schemę.",
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "description": "Komenda uruchamiana W OBRAZIE. Weryfikowana smoke testem przy każdym buildzie (guardrail #5).",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "workingDir": {
+          "description": "Katalog roboczy. Ma znaczenie, gdy zestaw ewaluacyjny jest kopiowany do obrazu, a nie instalowany — wtedy znajduje się wyłącznie przez cwd.",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "needs": {
+          "type": "array",
+          "items": { "enum": ["database"] },
+          "uniqueItems": true
+        },
+        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 }
+      }
+    },
+
+    "rollout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "description": "Dodanie strategii to zmiana kontraktu dla wszystkich tenantów, nie flaga per tenant (guardrail #6).",
+          "enum": ["canary"]
+        },
+        "steps": {
+          "description": "Procenty ruchu. Rosnące, ostatni równy 100 — sprawdzane przez walidator.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 1, "maximum": 100 }
+        },
+        "analysisStartAfterSeconds": {
+          "description": "Analiza startująca natychmiast uzna zdrową wersję za zepsutą, bo pod potrzebuje czasu na gotowość.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "imageRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "tag"],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+$"
+        },
+        "tag": {
+          "description": "Git SHA albo digest. `latest` i inne ruchome tagi są odrzucane: rollback i analiza canary porównywałyby się do celu, który się przesuwa.",
+          "type": "string",
+          "pattern": "^(sha256:[0-9a-f]{64}|[0-9a-f]{7,40})$"
+        },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+
+    "resourceBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memory", "cpu"],
+      "properties": {
+        "memory": { "$ref": "#/$defs/quantity" },
+        "cpu": { "$ref": "#/$defs/cpuQuantity" }
+      }
+    },
+
+    "quantity": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|k)?$"
+    },
+
+    "cpuQuantity": {
+      "type": ["string", "number"],
+      "pattern": "^[0-9]+(\\.[0-9]+)?m?$"
+    },
+
+    "k8sName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$",
+      "maxLength": 253
+    }
+  }
+}
