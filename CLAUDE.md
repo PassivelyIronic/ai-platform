@@ -33,28 +33,9 @@ tenant repo push
 
 `services/<name>/service.yaml` is the **only** interface a tenant uses:
 
-```yaml
-name: tsl-rag
-owner: jakub
-image: { repo: ghcr.io/passivelyironic/tsl-rag-api, tag: 9f3c2a1 }   # bumped by CI only
-runtime:
-  replicas: 2
-  resources: { requests: {memory: 1Gi, cpu: 500m}, limits: {memory: 2Gi, cpu: "2"} }
-  cache: { enabled: true, size: 2Gi }          # HF_HOME — without it every restart pulls 1.1 GB
-  probes: { startupSeconds: 150, readinessInitialDelay: 60 }
-  envFrom: { configMap: tsl-rag-env, secret: tsl-rag-secrets }
-database:
-  mode: managed                                 # managed | external
-  seed: oci://ghcr.io/passivelyironic/tsl-rag-corpus:corpus-a41f9c
-  embeddingModel: intfloat/multilingual-e5-base
-gate:
-  image: ghcr.io/passivelyironic/tsl-rag-api:9f3c2a1   # same image and tag as the deployed API
-  command: ["python", "-m", "evals.run_retrieval_evals"]
-  workingDir: /app                                     # evals/ is copied, not installed — found via cwd
-  needs: [database]
-  timeoutSeconds: 300
-rollout: { strategy: canary, steps: [10, 50, 100], analysisStartAfterSeconds: 180 }
-```
+A worked example lives in `services/tsl-rag/service.yaml`; the full field definition
+is `schemas/service.schema.json`. Read those, never a copy — a second copy of the
+contract is a second thing to keep in sync, and it loses (D-020).
 
 Validated by JSON Schema in CI. A bad contract fails the PR, never the cluster.
 
@@ -85,30 +66,6 @@ Implementation constraints that are not optional:
 - `database.mode: external` skips restore entirely.
 - The dump carries `embedding_model` in its metadata; tenant CI compares it against `database.embeddingModel`. `warmup()` would catch a mismatch anyway, but 60 s later and inside a pod.
 - Dump tags are derived from corpus + model + chunker content, never from the API image SHA (D-016).
-
-## Repo layout
-
-```
-services/
-  <tenant>/service.yaml   # the contract — one file per tenant
-charts/
-  ai-service/             # golden-path chart: API Deployment/Rollout, optional UI,
-                          # Postgres StatefulSet, restore Job, gate Job, Service,
-                          # Ingress, ServiceMonitor, ResourceQuota, NetworkPolicy
-argocd/
-  applicationset.yaml     # git directory generator over services/*/
-  platform/               # app-of-apps: ArgoCD, kube-prometheus-stack, Rollouts, SealedSecrets
-observability/
-  otel/                   # collector config (the apps are already instrumented)
-  grafana/dashboards/     # platform dashboard + per-tenant template
-  prometheus/             # alert rules
-docs/
-  onboarding.md           # how a tenant adds a service — the doc that proves self-service
-  runbook.md              # one procedure per alert
-  portability.md          # GKE Autopilot findings (D-011)
-.github/workflows/        # reusable workflow called by tenant repos
-secrets/                  # SealedSecret manifests only — never plaintext
-```
 
 ## Guardrails (non-negotiable)
 
