@@ -109,7 +109,7 @@ secrets/        wyłącznie SealedSecrets, per tenant i środowisko
 
 Katalogi `observability/` i `docs/` są na razie puste — wypełnia je Phase 4 i Phase 5.
 
-## Metodologia
+## Metodologia pracy z Claude
 
 Projekt jest prowadzony z agentem kodującym (Claude Code) pracującym pod pisemnymi ograniczeniami,
 a nie doraźnymi poleceniami. Struktura, która to organizuje, jest częścią repozytorium:
