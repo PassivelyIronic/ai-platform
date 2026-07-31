@@ -23,11 +23,15 @@ spec:
     repoURL: https://github.com/PassivelyIronic/ai-platform.git
     targetRevision: main
     path: argocd
-    directory:
-      # Bez rekursji — inaczej Application wciągnąłby argocd/platform/, czyli
-      # app-of-apps zarządzający komponentem, który zarządza app-of-apps.
-      # Na płasko w argocd/ leżą dokładnie dwa ApplicationSety i tak ma zostać.
-      recurse: false
+    # Bez rekursji — inaczej Application wciągnąłby argocd/platform/, czyli
+    # app-of-apps zarządzający komponentem, który zarządza app-of-apps.
+    # Na płasko w argocd/ leżą dokładnie dwa ApplicationSety i tak ma zostać.
+    #
+    # `directory.recurse: false` NIE jest tu wypisane celowo. To wartość
+    # domyślna, więc API server nie zapisuje jej w zasobie — w repo pole by
+    # było, na klastrze nie, i ArgoCD trzymałby `platform` w wiecznym
+    # OutOfSync, a selfHeal próbowałby to naprawiać w kółko bez skutku.
+    # Zweryfikowane: dokładnie to się stało przy pierwszym podejściu.
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

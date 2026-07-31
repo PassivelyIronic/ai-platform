@@ -218,3 +218,5 @@ rollout: { strategy: canary, steps: [10, 50, 100], analysisStartAfterSeconds: 18
 **Wave `-3`:** po kontrolerach SealedSecrets (`-5`) i Rollouts/Prometheus (`-4`). ApplicationSet `tenant-secrets` produkuje zasoby `SealedSecret`, które bez CRD od kontrolera są nieznanym typem.
 
 **Cel `make tenants` nie zostaje jako wygoda.** Ręczne `kubectl apply` na ApplicationSet po tej zmianie istniałoby wyłącznie po to, żeby dało się ominąć gita — a `selfHeal` i tak cofnąłby skutek. Jedyne, co by przetrwało, to nawyk.
+
+**Wartości domyślnych się tu nie wypisuje.** Pierwsze podejście miało jawne `directory.recurse: false`. API server nie zapisuje wartości domyślnej, więc pole istniało w repo i nie istniało w zasobie — `platform` wpadł w wieczny `OutOfSync`, który `selfHeal` bezskutecznie naprawiał w kółko. Intencja została w komentarzu, z manifestu znikła.
