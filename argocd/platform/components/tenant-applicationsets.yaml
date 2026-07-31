@@ -1,0 +1,37 @@
+# Oba ApplicationSety tenantów jako komponent platformy (D-023).
+#
+# Do 2026-07-31 leżały poza łańcuchem gita: `platform` wskazywał wyłącznie na
+# argocd/platform/components, więc jedyną drogą na klaster było `make tenants`.
+# Push zmieniający generator nie robił nic i nie zgłaszał przy tym błędu —
+# Applications pokazywały `Synced`, bo były zsynchronizowane ze starym
+# generatorem. Kosztowało to jedną migrację, w której nic się nie działo.
+#
+# To była dziura w dogfoodingu: zmiana miała płynąć przez pipeline, a wyjątek
+# na rzeczy imperatywne miał obejmować wyłącznie bootstrap/.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenant-applicationsets
+  namespace: argocd
+  annotations:
+    # Po kontrolerach (-5, -4): tenant-secrets tworzy zasoby SealedSecret,
+    # a te bez CRD od kontrolera są nieznanym typem.
+    argocd.argoproj.io/sync-wave: "-3"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/PassivelyIronic/ai-platform.git
+    targetRevision: main
+    path: argocd
+    directory:
+      # Bez rekursji — inaczej Application wciągnąłby argocd/platform/, czyli
+      # app-of-apps zarządzający komponentem, który zarządza app-of-apps.
+      # Na płasko w argocd/ leżą dokładnie dwa ApplicationSety i tak ma zostać.
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

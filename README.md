@@ -38,8 +38,10 @@ jedna komenda:
 ```
 make cluster      # k3d: 1 serwer + 2 agenty
 make bootstrap    # ArgoCD + komponenty platformy
-make tenants      # ApplicationSet nad services/
 ```
+
+Dwie komendy i koniec — ApplicationSety tenantów są komponentem platformy, więc
+przychodzą przez app-of-apps razem z resztą.
 
 Trzy węzły, nie jeden: przy jednym każdy pod ląduje tam, gdzie wolumen, więc konflikt
 node affinity na PVC byłby nieodtwarzalny. Czego to środowisko nie dowodzi — arm64

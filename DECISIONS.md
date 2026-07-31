@@ -204,3 +204,17 @@ rollout: { strategy: canary, steps: [10, 50, 100], analysisStartAfterSeconds: 18
 **Koszt, znaleziony w trakcie: SealedSecrets są pieczętowane strict-scope**, czyli związane parą (nazwa, namespace). Zmiana nazw namespace'ów na `<tenant>-<env>` unieważnia istniejące pieczęcie. `--scope cluster-wide` rozwiązałoby to jedną flagą i zostało **odrzucone**: sekret odszyfrowywalny w dowolnym namespace znosi izolację tenantów, którą budują namespace per tenant, ResourceQuota i NetworkPolicy. Sekrety są więc pieczętowane dwa razy, per środowisko. Efekt uboczny jest zresztą stanem docelowym, nie podatkiem: prod ma mieć własny klucz providera i własne hasło bazy, nieznane ze stagingu.
 
 **Konsekwencja dla migracji klastra:** namespace `tsl-rag` zostaje osierocony i wymaga ręcznego `kubectl delete` — razem z PVC bazy i jej 438 wierszami. To jest bezpieczne dokładnie dlatego, że seed jest artefaktem OCI (D-015): świeży `tsl-rag-staging` odtwarza je restore Jobem, bez parserów i bez modelu.
+
+## D-023: ApplicationSety tenantów są komponentem platformy, nie krokiem bootstrapu
+**Status:** accepted
+**Decision:** `argocd/applicationset.yaml` i `argocd/secrets-applicationset.yaml` wchodzą na klaster przez app-of-apps — nowy komponent `argocd/platform/components/tenant-applicationsets.yaml` wskazuje na katalog `argocd/` bez rekursji. Cel `make tenants` **znika**; `make cluster` + `make bootstrap` wystarczają, a `bootstrap/` przestaje być drogą, którą cokolwiek trafia na klaster po starcie ArgoCD.
+
+**Rationale:** to jest dziura znaleziona przy migracji na D-022, nie zaplanowana. `platform` wskazywał wyłącznie na `argocd/platform/components`, więc oba ApplicationSety żyły **poza łańcuchem gita** — jedyną drogą na klaster było ręczne `kubectl apply`. Push zmieniający generator nie robił nic **i nie zgłaszał przy tym błędu**: Applications pokazywały `Synced`, bo były zsynchronizowane ze starym generatorem, który nadal siedział na klastrze. Migracja stanęła na „pushnąłem i nic się nie stało", a diagnoza wymagała porównania spec generatora w klastrze z plikiem w repo.
+
+**Dlaczego to nie jest kosmetyka:** cisza jest tu gorsza od błędu. Application `Synced` względem nieaktualnego generatora wygląda dokładnie tak samo jak Application `Synced` względem aktualnego. Dopóki ApplicationSet nie był w gicie, twierdzenie „zmiana płynie przez pipeline, `bootstrap/` jest jedynym miejscem imperatywnym" (D-021) było nieprawdziwe dla tej jednej warstwy — a to akurat warstwa, która decyduje, co w ogóle powstaje. Guardrail #5 zabrania stawiać w README twierdzeń, których się nie da zademonstrować; to było jedno z nich.
+
+**Bez rekursji, celowo.** `directory.recurse: false` zatrzymuje Application na płaskim `argocd/`. Z rekursją wciągnąłby `argocd/platform/`, czyli app-of-apps zarządzający komponentem, który zarządza app-of-apps. Konsekwencja do zapamiętania: manifest platformowy dorzucony do `argocd/` na płasko zostanie objęty zarządzaniem automatycznie, a wrzucony do podkatalogu — nie.
+
+**Wave `-3`:** po kontrolerach SealedSecrets (`-5`) i Rollouts/Prometheus (`-4`). ApplicationSet `tenant-secrets` produkuje zasoby `SealedSecret`, które bez CRD od kontrolera są nieznanym typem.
+
+**Cel `make tenants` nie zostaje jako wygoda.** Ręczne `kubectl apply` na ApplicationSet po tej zmianie istniałoby wyłącznie po to, żeby dało się ominąć gita — a `selfHeal` i tak cofnąłby skutek. Jedyne, co by przetrwało, to nawyk.

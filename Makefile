@@ -36,7 +36,7 @@ endif
 CLUSTER     := ai-platform
 ARGOCD_VER  := 7.7.11
 
-.PHONY: help tools contracts render lint validate clean cluster bootstrap tenants teardown
+.PHONY: help tools contracts render lint validate clean cluster bootstrap teardown
 
 help:
 	@echo make tools     - sprawdza, czy wymagane narzedzia sa na PATH
@@ -45,10 +45,9 @@ help:
 	@echo make lint      - helm lint charta dla kazdego kontraktu
 	@echo make validate  - kubeconform na wyrenderowanych manifestach
 	@echo make clean     - usuwa $(RENDER_DIR)
-	@echo .
+	@echo.
 	@echo make cluster   - stawia klaster k3d: 1 serwer + 2 agenty
 	@echo make bootstrap - ArgoCD + app-of-apps komponentow platformy
-	@echo make tenants   - ApplicationSet nad services/
 	@echo make teardown  - kasuje klaster w calosci
 	@echo Tenanci wykryci w services/: $(if $(SERVICES),$(SERVICES),BRAK)
 
@@ -68,9 +67,10 @@ bootstrap:
 	@echo Haslo admina ArgoCD:
 	kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}"
 
-tenants:
-	kubectl apply -f argocd/secrets-applicationset.yaml
-	kubectl apply -f argocd/applicationset.yaml
+# Nie ma celu `tenants`. ApplicationSety tenantow przychodzą przez app-of-apps
+# (argocd/platform/components/tenant-applicationsets.yaml, D-023), wiec `make
+# bootstrap` wystarczy. Recznego `kubectl apply` na nie nie ma, bo istnialby
+# wylacznie po to, zeby dalo sie ominac gita.
 
 teardown:
 	k3d cluster delete $(CLUSTER)

@@ -10,8 +10,11 @@ kamień (DECISIONS D-021).
 ```bash
 make cluster      # k3d: 1 serwer + 2 agenty, k3s v1.31
 make bootstrap    # ArgoCD + app-of-apps komponentów platformy
-make tenants      # ApplicationSet nad services/*
 ```
+
+Na tym kończy się imperatywność. ApplicationSety tenantów są zwykłym komponentem
+platformy i przychodzą przez app-of-apps (D-023) — nie ma dla nich osobnego
+`kubectl apply`, bo istniałby wyłącznie po to, żeby dało się ominąć gita.
 
 Teardown: `make teardown` — kasuje klaster w całości, razem z wolumenami.
 
